@@ -8,22 +8,43 @@ import streamlit as st
 import yfinance as yf
 
 # ==========================================
-# PAGE CONFIGURATION & STYLING
+# PAGE CONFIGURATION & FUTURISTIC STYLING
 # ==========================================
 st.set_page_config(
-    page_title="Nifty 100 VP Quant Terminal",
+    page_title="Nifty 100 Quant Terminal",
     page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# Custom Dark Theme Styling
 st.markdown(
     """
     <style>
-    .main { background-color: #0E1117; }
-    .stMetric { background-color: #1E222D; padding: 15px; border-radius: 10px; border: 1px solid #2B2F3A; }
-    .stDataFrame { border-radius: 10px; overflow: hidden; }
+    /* Global App Background & Text Contrast */
+    .stApp { background-color: #07090E; color: #E2E8F0; font-family: 'Inter', sans-serif; }
+    
+    /* Glowing Headers & Titles */
+    h1, h2, h3 { color: #00E5FF !important; font-weight: 700; letter-spacing: -0.5px; }
+    
+    /* Futuristic Metric Cards */
+    div[data-testid="stMetric"] {
+        background: linear-gradient(135deg, #121824 0%, #1A2332 100%);
+        border: 1px solid #1E2D40;
+        padding: 18px;
+        border-radius: 12px;
+        box-shadow: 0 8px 32px 0 rgba(0, 229, 255, 0.05);
+    }
+    div[data-testid="stMetric"] label { color: #94A3B8 !important; font-weight: 600; font-size: 0.9rem; }
+    div[data-testid="stMetric"] div[data-testid="stMetricValue"] { color: #FFFFFF !important; font-size: 1.6rem; font-weight: 700; }
+
+    /* Custom Styled Tabs */
+    .stTabs [data-baseweb="tab-list"] { gap: 8px; background-color: #0B0E14; padding: 6px; border-radius: 12px; border: 1px solid #1E2D40; }
+    .stTabs [data-baseweb="tab"] { background-color: transparent; color: #94A3B8; border-radius: 8px; font-weight: 600; padding: 10px 20px; }
+    .stTabs [data-baseweb="tab"][aria-selected="true"] { background: linear-gradient(135deg, #00E5FF 0%, #00838F 100%) !important; color: #07090E !important; }
+
+    /* Dataframes & Inputs */
+    .stDataFrame { border-radius: 12px; border: 1px solid #1E2D40; overflow: hidden; }
+    .stTextInput input, .stNumberInput input, .stSelectbox select { background-color: #121824; color: #FFFFFF; border: 1px solid #1E2D40; border-radius: 8px; }
     </style>
 """,
     unsafe_allow_html=True,
@@ -31,107 +52,22 @@ st.markdown(
 
 # Nifty 100 Tickers
 NIFTY_100_TICKERS = [
-    "ABB.NS",
-    "ACC.NS",
-    "ADANIENT.NS",
-    "ADANIGREEN.NS",
-    "ADANIPORTS.NS",
-    "ADANIPOWER.NS",
-    "ATGL.NS",
-    "AMBUJACEM.NS",
-    "APOLLOHOSP.NS",
-    "ASIANPAINT.NS",
-    "DMART.NS",
-    "AXISBANK.NS",
-    "BAJAJ-AUTO.NS",
-    "BAJFINANCE.NS",
-    "BAJAJFINSV.NS",
-    "BAJAJHLDNG.NS",
-    "BANKBARODA.NS",
-    "BERGEPAINT.NS",
-    "BEL.NS",
-    "BHARATFORG.NS",
-    "BPCL.NS",
-    "BHARTIARTL.NS",
-    "BOSCHLTD.NS",
-    "BRITANNIA.NS",
-    "CANBK.NS",
-    "CHOLAFIN.NS",
-    "CIPLA.NS",
-    "COALINDIA.NS",
-    "COLPAL.NS",
-    "DLF.NS",
-    "DABUR.NS",
-    "DIVISLAB.NS",
-    "DRREDDY.NS",
-    "EICHERMOT.NS",
-    "GAIL.NS",
-    "GODREJCP.NS",
-    "GODREJPROP.NS",
-    "GRASIM.NS",
-    "HCLTECH.NS",
-    "HDFCBANK.NS",
-    "HDFCLIFE.NS",
-    "HAVELLS.NS",
-    "HEROMOTOCO.NS",
-    "HINDALCO.NS",
-    "HAL.NS",
-    "HINDUNILVR.NS",
-    "ICICIBANK.NS",
-    "ICICIGI.NS",
-    "ICICIPRULI.NS",
-    "IOC.NS",
-    "IRCTC.NS",
-    "IRFC.NS",
-    "ITC.NS",
-    "INDUSINDBK.NS",
-    "NAUKRI.NS",
-    "INFY.NS",
-    "INDIGO.NS",
-    "JSWSTEEL.NS",
-    "JINDALSTEL.NS",
-    "JIOFIN.NS",
-    "KOTAKBANK.NS",
-    "LTIM.NS",
-    "LT.NS",
-    "LUPIN.NS",
-    "M&M.NS",
-    "MARUTI.NS",
-    "MAXHEALTH.NS",
-    "MSUMI.NS",
-    "NTPC.NS",
-    "NESTLEIND.NS",
-    "ONGC.NS",
-    "PIDILITIND.NS",
-    "PFC.NS",
-    "POWERGRID.NS",
-    "PNB.NS",
-    "RELIANCE.NS",
-    "SBICARD.NS",
-    "SBILIFE.NS",
-    "SRF.NS",
-    "MOTHERSON.NS",
-    "SBIN.NS",
-    "SUNPHARMA.NS",
-    "TVSMOTOR.NS",
-    "TCS.NS",
-    "TATACONSUM.NS",
-    "TATAELXSI.NS",
-    "TATAMOTORS.NS",
-    "TATAPOWER.NS",
-    "TATASTEEL.NS",
-    "TECHM.NS",
-    "TITAN.NS",
-    "TORNTPHARM.NS",
-    "TRENT.NS",
-    "ULTRACEMCO.NS",
-    "UNOMINDA.NS",
-    "UPL.NS",
-    "VBL.NS",
-    "VEDL.NS",
-    "WIPRO.NS",
-    "ZOMATO.NS",
-    "ZYDUSLIFE.NS",
+    "ABB.NS", "ACC.NS", "ADANIENT.NS", "ADANIGREEN.NS", "ADANIPORTS.NS", "ADANIPOWER.NS",
+    "ATGL.NS", "AMBUJACEM.NS", "APOLLOHOSP.NS", "ASIANPAINT.NS", "DMART.NS", "AXISBANK.NS",
+    "BAJAJ-AUTO.NS", "BAJFINANCE.NS", "BAJAJFINSV.NS", "BAJAJHLDNG.NS", "BANKBARODA.NS",
+    "BERGEPAINT.NS", "BEL.NS", "BHARATFORG.NS", "BPCL.NS", "BHARTIARTL.NS", "BOSCHLTD.NS",
+    "BRITANNIA.NS", "CANBK.NS", "CHOLAFIN.NS", "CIPLA.NS", "COALINDIA.NS", "COLPAL.NS",
+    "DLF.NS", "DABUR.NS", "DIVISLAB.NS", "DRREDDY.NS", "EICHERMOT.NS", "GAIL.NS", "GODREJCP.NS",
+    "GODREJPROP.NS", "GRASIM.NS", "HCLTECH.NS", "HDFCBANK.NS", "HDFCLIFE.NS", "HAVELLS.NS",
+    "HEROMOTOCO.NS", "HINDALCO.NS", "HAL.NS", "HINDUNILVR.NS", "ICICIBANK.NS", "ICICIGI.NS",
+    "ICICIPRULI.NS", "IOC.NS", "IRCTC.NS", "IRFC.NS", "ITC.NS", "INDUSINDBK.NS", "NAUKRI.NS",
+    "INFY.NS", "INDIGO.NS", "JSWSTEEL.NS", "JINDALSTEL.NS", "JIOFIN.NS", "KOTAKBANK.NS",
+    "LTIM.NS", "LT.NS", "LUPIN.NS", "M&M.NS", "MARUTI.NS", "MAXHEALTH.NS", "MSUMI.NS",
+    "NTPC.NS", "NESTLEIND.NS", "ONGC.NS", "PIDILITIND.NS", "PFC.NS", "POWERGRID.NS",
+    "PNB.NS", "RELIANCE.NS", "SBICARD.NS", "SBILIFE.NS", "SRF.NS", "MOTHERSON.NS", "SBIN.NS",
+    "SUNPHARMA.NS", "TVSMOTOR.NS", "TCS.NS", "TATACONSUM.NS", "TATAELXSI.NS", "TATAMOTORS.NS",
+    "TATAPOWER.NS", "TATASTEEL.NS", "TECHM.NS", "TITAN.NS", "TORNTPHARM.NS", "TRENT.NS",
+    "ULTRACEMCO.NS", "UNOMINDA.NS", "UPL.NS", "VBL.NS", "VEDL.NS", "WIPRO.NS", "ZOMATO.NS", "ZYDUSLIFE.NS",
 ]
 
 
@@ -153,12 +89,8 @@ def calculate_volume_profile(df, lookback=20):
         return None, None, None
 
     bins = np.linspace(p_min, p_max, 31)
-    window_df["Typical_Price"] = (
-        window_df["High"] + window_df["Low"] + window_df["Close"]
-    ) / 3
-    window_df["Bin"] = pd.cut(
-        window_df["Typical_Price"], bins=bins, include_lowest=True
-    )
+    window_df["Typical_Price"] = (window_df["High"] + window_df["Low"] + window_df["Close"]) / 3
+    window_df["Bin"] = pd.cut(window_df["Typical_Price"], bins=bins, include_lowest=True)
 
     vp = window_df.groupby("Bin", observed=False)["Volume"].sum().reset_index()
     vp["Price_Mid"] = vp["Bin"].apply(lambda x: x.mid)
@@ -186,17 +118,11 @@ def calculate_volume_profile(df, lookback=20):
 def run_live_scan(val_threshold_pct=2.0, ema_period=200):
     signals = []
     scan_date = datetime.now().strftime("%Y-%m-%d")
-    data = yf.download(
-        NIFTY_100_TICKERS, period="1y", interval="1d", group_by="ticker", progress=False
-    )
+    data = yf.download(NIFTY_100_TICKERS, period="1y", interval="1d", group_by="ticker", progress=False)
 
     for ticker in NIFTY_100_TICKERS:
         try:
-            df = (
-                data[ticker].dropna()
-                if ticker in data.columns.levels[0]
-                else pd.DataFrame()
-            )
+            df = data[ticker].dropna() if ticker in data.columns.levels[0] else pd.DataFrame()
             if len(df) < ema_period + 20:
                 continue
 
@@ -228,21 +154,19 @@ def run_live_scan(val_threshold_pct=2.0, ema_period=200):
                 est_days = max(1, int(round(reward / atr_val))) if atr_val > 0 else 3
                 raw_symbol = ticker.replace(".NS", "")
 
-                signals.append(
-                    {
-                        "Date": scan_date,
-                        "Stock": raw_symbol,
-                        "TradingView Link": f"https://in.tradingview.com/chart/?symbol=NSE:{raw_symbol}",
-                        "Entry Price (₹)": round(entry, 2),
-                        "Target POC (₹)": round(target, 2),
-                        "Stop Loss (₹)": round(sl, 2),
-                        "Est. Days": f"{est_days} Days",
-                        "R:R Ratio": round(rr_ratio, 2),
-                        "200 EMA (₹)": round(ema_val, 2),
-                        "VAL Support (₹)": round(val_price, 2),
-                        "Dist to VAL (%)": round(dist_to_val, 2),
-                    }
-                )
+                signals.append({
+                    "Date": scan_date,
+                    "Stock": raw_symbol,
+                    "TradingView Link": f"https://in.tradingview.com/chart/?symbol=NSE:{raw_symbol}",
+                    "Entry Price (₹)": round(entry, 2),
+                    "Target POC (₹)": round(target, 2),
+                    "Stop Loss (₹)": round(sl, 2),
+                    "Est. Days": f"{est_days} Days",
+                    "R:R Ratio": round(rr_ratio, 2),
+                    "200 EMA (₹)": round(ema_val, 2),
+                    "VAL Support (₹)": round(val_price, 2),
+                    "Dist to VAL (%)": round(dist_to_val, 2),
+                })
         except Exception:
             continue
 
@@ -250,10 +174,10 @@ def run_live_scan(val_threshold_pct=2.0, ema_period=200):
 
 
 # ==========================================
-# BACKTESTING ENGINE (1 to 10 Years)
+# BACKTESTING ENGINE WITH CAPITAL SIMULATION
 # ==========================================
 @st.cache_data(ttl=3600)
-def run_backtest(ticker, years=3, val_threshold_pct=2.0, ema_period=200):
+def run_backtest(ticker, years=3, val_threshold_pct=2.0, ema_period=200, initial_capital=100000):
     start_date = (datetime.now() - timedelta(days=years * 365)).strftime("%Y-%m-%d")
     df = yf.download(ticker, start=start_date, progress=False)
 
@@ -270,6 +194,7 @@ def run_backtest(ticker, years=3, val_threshold_pct=2.0, ema_period=200):
     trades = []
     in_trade = False
     entry_price, sl, target, entry_date = 0, 0, 0, None
+    current_capital = initial_capital
 
     for i in range(ema_period + 20, len(df)):
         sub_df = df.iloc[:i]
@@ -277,7 +202,6 @@ def run_backtest(ticker, years=3, val_threshold_pct=2.0, ema_period=200):
         curr_date = df.index[i]
 
         if not in_trade:
-            # Check for Signal
             poc, val, _ = calculate_volume_profile(sub_df, lookback=20)
             if poc and val:
                 close_p = float(curr_row["Close"])
@@ -291,37 +215,38 @@ def run_backtest(ticker, years=3, val_threshold_pct=2.0, ema_period=200):
                     target = poc
                     entry_date = curr_date
         else:
-            # Manage Open Trade
             high_p = float(curr_row["High"])
             low_p = float(curr_row["Low"])
 
             if low_p <= sl:
-                # Stop Loss Hit
                 pnl_pct = ((sl - entry_price) / entry_price) * 100
-                trades.append(
-                    {
-                        "Entry Date": entry_date,
-                        "Exit Date": curr_date,
-                        "Type": "SL Hit 🔴",
-                        "Entry": entry_price,
-                        "Exit": sl,
-                        "PnL (%)": round(pnl_pct, 2),
-                    }
-                )
+                trade_pnl_rs = current_capital * (pnl_pct / 100)
+                current_capital += trade_pnl_rs
+                trades.append({
+                    "Entry Date": entry_date.strftime("%Y-%m-%d"),
+                    "Exit Date": curr_date.strftime("%Y-%m-%d"),
+                    "Type": "SL Hit 🔴",
+                    "Entry (₹)": round(entry_price, 2),
+                    "Exit (₹)": round(sl, 2),
+                    "PnL (%)": round(pnl_pct, 2),
+                    "Profit/Loss (₹)": round(trade_pnl_rs, 2),
+                    "Portfolio (₹)": round(current_capital, 2)
+                })
                 in_trade = False
             elif high_p >= target:
-                # Target Hit
                 pnl_pct = ((target - entry_price) / entry_price) * 100
-                trades.append(
-                    {
-                        "Entry Date": entry_date,
-                        "Exit Date": curr_date,
-                        "Type": "Target Hit 🟢",
-                        "Entry": entry_price,
-                        "Exit": target,
-                        "PnL (%)": round(pnl_pct, 2),
-                    }
-                )
+                trade_pnl_rs = current_capital * (pnl_pct / 100)
+                current_capital += trade_pnl_rs
+                trades.append({
+                    "Entry Date": entry_date.strftime("%Y-%m-%d"),
+                    "Exit Date": curr_date.strftime("%Y-%m-%d"),
+                    "Type": "Target Hit 🟢",
+                    "Entry (₹)": round(entry_price, 2),
+                    "Exit (₹)": round(target, 2),
+                    "PnL (%)": round(pnl_pct, 2),
+                    "Profit/Loss (₹)": round(trade_pnl_rs, 2),
+                    "Portfolio (₹)": round(current_capital, 2)
+                })
                 in_trade = False
 
     trades_df = pd.DataFrame(trades)
@@ -332,14 +257,10 @@ def run_backtest(ticker, years=3, val_threshold_pct=2.0, ema_period=200):
 # HEADER & MARKET INDICES
 # ==========================================
 st.title("⚡ Nifty 100 Volume Profile Quant Terminal")
-st.caption(
-    "Institutional Mean-Reversion Scanner & Multi-Year Backtesting Engine"
-)
+st.caption("Institutional Mean-Reversion Scanner & Portfolio Backtesting Suite")
 
 try:
-    indices = yf.download(
-        ["^NSEI", "^NSEBANK"], period="5d", interval="1d", progress=False
-    )
+    indices = yf.download(["^NSEI", "^NSEBANK"], period="5d", interval="1d", progress=False)
     if not indices.empty and ("Close", "^NSEI") in indices.columns:
         n_close = float(indices[("Close", "^NSEI")].iloc[-1])
         n_prev = float(indices[("Close", "^NSEI")].iloc[-2])
@@ -358,11 +279,9 @@ except Exception:
 st.divider()
 
 # ==========================================
-# MAIN INTERFACE TABS
+# TABS INTERFACE
 # ==========================================
-tab1, tab2, tab3 = st.tabs(
-    ["🚀 Live Scanner", "📊 Strategy Backtester", "🤖 Quant Intelligence AI"]
-)
+tab1, tab2, tab3 = st.tabs(["🚀 Live Scanner", "📊 Strategy Backtester", "🤖 Quant AI Intelligence"])
 
 # ------------------------------------------
 # TAB 1: LIVE SCANNER
@@ -380,15 +299,12 @@ with tab1:
         st.dataframe(
             scan_results,
             column_config={
-                "TradingView Link": st.column_config.LinkColumn(
-                    "TradingView Chart", display_text="📊 Open Chart"
-                )
+                "TradingView Link": st.column_config.LinkColumn("TradingView Chart", display_text="📊 Open Chart")
             },
             use_container_width=True,
             hide_index=True,
         )
 
-        # Excel Export
         excel_buffer = io.BytesIO()
         with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
             scan_results.to_excel(writer, index=False, sheet_name="Setups")
@@ -400,28 +316,25 @@ with tab1:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
     else:
-        st.info(
-            f"No stocks currently sitting within {v_limit}% of VAL support. Try widening the slider to 2.5%."
-        )
+        st.info(f"No stocks currently sitting within {v_limit}% of VAL support. Try widening the slider to 2.5%.")
 
 # ------------------------------------------
-# TAB 2: MULTI-YEAR BACKTESTER
+# TAB 2: MULTI-YEAR BACKTESTER & PORTFOLIO SIMULATOR
 # ------------------------------------------
 with tab2:
-    st.subheader("Strategy Backtesting Engine")
-    st.caption("Verify historic win rate and true performance across 1 to 10 years.")
+    st.subheader("Strategy Backtesting & Portfolio Simulator")
+    st.caption("Simulate capital growth, absolute profit/loss, and historical performance over 1 to 10 years.")
 
-    col_a, col_b, col_c = st.columns(3)
-    bt_symbol = col_a.selectbox("Select Stock Ticker", NIFTY_100_TICKERS, index=47) # ICICIBANK.NS
-    bt_years = col_b.slider("Backtest Period (Years)", 1, 10, 3)
-    bt_threshold = col_c.slider("Backtest VAL Threshold (%)", 0.5, 5.0, 2.0, 0.5)
+    col_a, col_b, col_c, col_d = st.columns(4)
+    bt_symbol = col_a.selectbox("Stock Ticker", NIFTY_100_TICKERS, index=47)
+    initial_cap = col_b.number_input("Investment Amount (₹)", value=100000, step=10000, format="%d")
+    bt_years = col_c.slider("Period (Years)", 1, 10, 3)
+    bt_threshold = col_d.slider("VAL Threshold (%)", 0.5, 5.0, 2.0, 0.5)
 
-    if st.button("▶️ Run Multi-Year Backtest", type="primary"):
-        with st.spinner(
-            f"Fetching {bt_years} year(s) of historical data for {bt_symbol}..."
-        ):
+    if st.button("▶️ Run Backtest & Simulation", type="primary"):
+        with st.spinner(f"Simulating trades for {bt_symbol} across {bt_years} year(s)..."):
             bt_df, price_df = run_backtest(
-                bt_symbol, years=bt_years, val_threshold_pct=bt_threshold
+                bt_symbol, years=bt_years, val_threshold_pct=bt_threshold, initial_capital=initial_cap
             )
 
         if bt_df is not None and not bt_df.empty:
@@ -431,88 +344,75 @@ with tab2:
 
             win_rate = (wins / total_trades) * 100 if total_trades > 0 else 0
             loss_rate = (losses / total_trades) * 100 if total_trades > 0 else 0
-            total_pnl = bt_df["PnL (%)"].sum()
+            
+            final_portfolio = float(bt_df["Portfolio (₹)"].iloc[-1])
+            net_profit_rs = final_portfolio - initial_cap
+            total_return_pct = (net_profit_rs / initial_cap) * 100
 
-            win_pnl = bt_df[bt_df["PnL (%)"] > 0]["PnL (%)"].sum()
-            loss_pnl = abs(bt_df[bt_df["PnL (%)"] < 0]["PnL (%)"].sum())
-            profit_factor = round(win_pnl / loss_pnl, 2) if loss_pnl > 0 else "∞"
+            start_date_str = str(bt_df["Entry Date"].min())
+            end_date_str = str(bt_df["Exit Date"].max())
 
-            # Performance Cards
-            m1, m2, m3, m4, m5 = st.columns(5)
-            m1.metric("Total Trades", f"{total_trades}")
-            m2.metric("Win Rate (%)", f"{win_rate:.1f}%")
-            m3.metric("Loss Rate (%)", f"{loss_rate:.1f}%")
-            m4.metric("Cum. Return", f"{total_pnl:+.1f}%")
-            m5.metric("Profit Factor", f"{profit_factor}")
+            st.markdown("### 📈 Performance & Capital Summary")
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Initial Investment", f"₹{initial_cap:,.0f}")
+            m2.metric("Final Portfolio Value", f"₹{final_portfolio:,.2f}", f"{total_return_pct:+.2f}%")
+            m3.metric("Net Profit / Loss (₹)", f"₹{net_profit_rs:,.2f}")
+            m4.metric("Win Rate (%)", f"{win_rate:.1f}% ({wins}W / {losses}L)")
 
-            # Interactive Plotly Equity Curve
-            bt_df["Cumulative PnL (%)"] = bt_df["PnL (%)"].cumsum()
+            st.caption(f"📅 **Backtest Period:** `{start_date_str}` to `{end_date_str}` ({bt_years} Years Active Simulation)")
+
+            # Equity Curve Plotly Chart
             fig = go.Figure()
-            fig.add_trace(
-                go.Scatter(
-                    x=bt_df["Exit Date"],
-                    y=bt_df["Cumulative PnL (%)"],
-                    mode="lines+markers",
-                    name="Equity Curve",
-                    line=dict(color="#00E676", width=2),
-                )
-            )
+            fig.add_trace(go.Scatter(
+                x=bt_df["Exit Date"],
+                y=bt_df["Portfolio (₹)"],
+                mode="lines+markers",
+                name="Portfolio Value",
+                line=dict(color="#00E5FF", width=3),
+                fill="tozeroy",
+                fillcolor="rgba(0, 229, 255, 0.05)"
+            ))
             fig.update_layout(
-                title=f"{bt_symbol} Cumulative Strategy Returns ({bt_years} Years)",
+                title=f"{bt_symbol} Portfolio Growth Curve (₹{initial_cap:,} Start)",
                 template="plotly_dark",
-                xaxis_title="Date",
-                yaxis_title="Cumulative Return (%)",
+                xaxis_title="Exit Date",
+                yaxis_title="Portfolio Value (₹)",
+                paper_bgcolor="#0E1117",
+                plot_bgcolor="#0E1117",
             )
             st.plotly_chart(fig, use_container_width=True)
 
-            # Trades List
-            st.subheader("Historical Trades Log")
+            st.subheader("Detailed Trade Execution Log")
             st.dataframe(bt_df, use_container_width=True, hide_index=True)
         else:
-            st.warning(
-                f"No backtest trades triggered for {bt_symbol} in the selected {bt_years}-year window. Try adjusting the parameters!"
-            )
+            st.warning(f"No trades triggered for {bt_symbol} in the selected timeframe. Try modifying the parameters or ticker.")
 
 # ------------------------------------------
 # TAB 3: QUANT AI KNOWLEDGE BASE
 # ------------------------------------------
 with tab3:
     st.subheader("🤖 Strategy Concepts & Core Rules")
-
     with st.expander("📚 Value Area Low (VAL) & Point of Control (POC)", expanded=True):
-        st.markdown(
-            """
-        * **POC (Point of Control):** The exact price level where the highest volume was traded during the 20-day lookback. Functions as a strong magnet/target.
-        * **VAL (Value Area Low):** The bottom boundary of the 70% volume distribution. Serves as institutional floor support.
-        * **Mean Reversion Rule:** Entering near VAL above the 200 EMA offers asymmetric risk:reward aiming for a return to the POC.
-        """
-        )
-
-    with st.expander("🛡️ Risk Management Guidelines"):
-        st.markdown(
-            """
-        * **Stop Loss:** Set strictly below VAL (e.g., VAL - 0.8%).
-        * **Position Sizing:** Risk no more than 1% to 2% of total capital on a single setup.
-        * **Target:** Exit 80% position at POC, trail remainder with ATR stop.
-        """
-        )
+        st.markdown("""
+        * **POC (Point of Control):** The exact price level where the highest volume was traded during the lookback period. Acts as a price magnet.
+        * **VAL (Value Area Low):** The bottom institutional support boundary of the 70% volume cluster.
+        * **Mean Reversion Rule:** Entering near VAL above the 200 EMA yields asymmetric risk-to-reward toward the POC target.
+        """)
 
 # ==========================================
-# SIDEBAR INTERACTIVE AI QUANT ASSISTANT
+# SIDEBAR AI QUANT ASSISTANT
 # ==========================================
 with st.sidebar:
     st.header("💬 Ask AI Quant Assistant")
-    st.caption("Get technical analysis insights for any stock!")
+    st.caption("Get technical answers on any stock symbol!")
 
-    user_q = st.text_input("Enter stock symbol or technical question:")
+    user_q = st.text_input("Enter stock or question:")
     if user_q:
         q_upper = user_q.strip().upper()
         st.write(f"**Analyzing `{q_upper}`...**")
-
         st.info(
             f"🤖 **Quant Insight for {q_upper}:**\n\n"
-            f"When evaluating **{q_upper}**:\n"
-            f"1. **Trend Check:** Verify that the price is above the 200 EMA to ensure high win probability.\n"
-            f"2. **Volume Profile:** Look for price compression near Value Area Low (VAL).\n"
-            f"3. **Candle Confirmation:** Seek bullish rejection candles (pinbars/engulfing) right at VAL before entering."
+            f"1. **Trend Filter:** Confirm price is above the 200 EMA.\n"
+            f"2. **Volume Profile:** Look for volume nodes clustered near VAL support.\n"
+            f"3. **Execution:** Enter on bullish price action rejection with a stop loss just below VAL."
         )
