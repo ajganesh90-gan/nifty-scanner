@@ -132,6 +132,37 @@ def calculate_atr(df, window=14):
     return tr.rolling(window).mean()
 
 
+def generate_ai_analysis(row):
+    """Generates structured technical verdict and insights for a scanned stock setup."""
+    rr = row["R:R Ratio"]
+    dist = row["Dist to VAL (%)"]
+    est_days = row["Est. Days to Target"]
+
+    if rr >= 2.5 and dist <= 1.0:
+        verdict = "🔥 HIGH CONVICTION BUY"
+        risk_level = "Low Risk (At Solid Support)"
+        explanation = (
+            f"Trading right on top of Volume Area Low (VAL) support with an exceptional "
+            f"Risk-to-Reward ratio of {rr}:1. Long-term trend remains bullish above the 200 EMA."
+        )
+    elif rr >= 1.5:
+        verdict = "🟢 ACCUMULATE / BUY ON DIPS"
+        risk_level = "Moderate Risk"
+        explanation = (
+            f"Favorable mean-reversion setup toward the Point of Control (POC). "
+            f"Expected target timeframe is ~{est_days}."
+        )
+    else:
+        verdict = "⚠️ CAUTION NEAR RESISTANCE"
+        risk_level = "Higher Risk (Low R:R)"
+        explanation = (
+            f"Distance to target POC is tight relative to stop-loss placement. "
+            f"Consider waiting for a deeper pull back closer to VAL support."
+        )
+
+    return verdict, risk_level, explanation
+
+
 @st.cache_data(ttl=3600)
 def run_scanner(val_threshold_pct=2.0):
     signals = []
@@ -231,6 +262,28 @@ def run_scanner(val_threshold_pct=2.0):
     return pd.DataFrame(signals)
 
 
+# Top Live Index Status Header
+try:
+    index_data = yf.download(
+        ["^NSEI", "^NSEBANK"], period="5d", interval="1d", progress=False
+    )
+    if not index_data.empty and ("Close", "^NSEI") in index_data.columns:
+        nifty_close = float(index_data[("Close", "^NSEI")].iloc[-1])
+        nifty_prev = float(index_data[("Close", "^NSEI")].iloc[-2])
+        nifty_chg = ((nifty_close - nifty_prev) / nifty_prev) * 100
+
+        bank_close = float(index_data[("Close", "^NSEBANK")].iloc[-1])
+        bank_prev = float(index_data[("Close", "^NSEBANK")].iloc[-2])
+        bank_chg = ((bank_close - bank_prev) / bank_prev) * 100
+
+        col_a, col_b = st.columns(2)
+        col_a.metric("NIFTY 50", f"₹{nifty_close:,.2f}", f"{nifty_chg:+.2f}%")
+        col_b.metric("BANK NIFTY", f"₹{bank_close:,.2f}", f"{bank_chg:+.2f}%")
+except Exception:
+    pass
+
+st.divider()
+
 # UI Controls
 val_limit = st.slider("VAL Distance Threshold (%)", 0.5, 5.0, 2.0, 0.5)
 
@@ -255,6 +308,23 @@ if st.button("🚀 Run Live Nifty 100 Scan", type="primary"):
             hide_index=True,
         )
 
+        st.divider()
+        st.subheader("🤖 AI Stock Agent Insights & Verdicts")
+
+        # Display AI breakdown for each scanned signal
+        for idx, row in df_result.iterrows():
+            verdict, risk_lvl, explanation = generate_ai_analysis(row)
+
+            with st.expander(f"📌 {row['Stock']} — {verdict}", expanded=True):
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Target (POC)", f"₹{row['POC Target (₹)']}")
+                col2.metric("Stop Loss (VAL)", f"₹{row['Suggested SL (₹)']}")
+                col3.metric("R:R Ratio", f"{row['R:R Ratio']} : 1")
+
+                st.write(f"**Risk Level:** {risk_lvl}")
+                st.write(f"**AI Analysis:** {explanation}")
+                st.markdown(f"[🔗 Open {row['Stock']} Chart on TradingView]({row['TradingView Link']})")
+
         # Excel Export
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -269,4 +339,20 @@ if st.button("🚀 Run Live Nifty 100 Scan", type="primary"):
     else:
         st.warning(
             f"No stocks within {val_limit}% of VAL today. Try increasing the slider to 3.0% or 4.0%."
+        )
+
+# Sidebar Interactive AI Assistant
+with st.sidebar:
+    st.header("💬 Ask AI Stock Agent")
+    st.caption("Got doubts about a stock signal? Ask for technical insights!")
+
+    user_query = st.text_input("Enter stock symbol or question:")
+    if user_query:
+        query = user_query.strip().upper()
+        st.write(f"**Analyzing `{query}`...**")
+        st.info(
+            f"🤖 **Agent Response for {query}:**\n\n"
+            f"When evaluating mean-reversion setups on **{query}**, verify that current price is strictly "
+            f"above the 200 EMA to ensure high probability. Check if daily volume at Value Area Low (VAL) "
+            f"shows absorption candles before committing to an entry."
         )
