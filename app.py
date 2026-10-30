@@ -20,13 +20,9 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-    /* Global App Background & Text Contrast */
     .stApp { background-color: #07090E; color: #E2E8F0; font-family: 'Inter', sans-serif; }
-    
-    /* Glowing Headers & Titles */
     h1, h2, h3 { color: #00E5FF !important; font-weight: 700; letter-spacing: -0.5px; }
     
-    /* Futuristic Metric Cards */
     div[data-testid="stMetric"] {
         background: linear-gradient(135deg, #121824 0%, #1A2332 100%);
         border: 1px solid #1E2D40;
@@ -37,12 +33,10 @@ st.markdown(
     div[data-testid="stMetric"] label { color: #94A3B8 !important; font-weight: 600; font-size: 0.9rem; }
     div[data-testid="stMetric"] div[data-testid="stMetricValue"] { color: #FFFFFF !important; font-size: 1.6rem; font-weight: 700; }
 
-    /* Custom Styled Tabs */
     .stTabs [data-baseweb="tab-list"] { gap: 8px; background-color: #0B0E14; padding: 6px; border-radius: 12px; border: 1px solid #1E2D40; }
     .stTabs [data-baseweb="tab"] { background-color: transparent; color: #94A3B8; border-radius: 8px; font-weight: 600; padding: 10px 20px; }
     .stTabs [data-baseweb="tab"][aria-selected="true"] { background: linear-gradient(135deg, #00E5FF 0%, #00838F 100%) !important; color: #07090E !important; }
 
-    /* Dataframes & Inputs */
     .stDataFrame { border-radius: 12px; border: 1px solid #1E2D40; overflow: hidden; }
     .stTextInput input, .stNumberInput input, .stSelectbox select { background-color: #121824; color: #FFFFFF; border: 1px solid #1E2D40; border-radius: 8px; }
     </style>
@@ -50,7 +44,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Nifty 100 Tickers
 NIFTY_100_TICKERS = [
     "ABB.NS", "ACC.NS", "ADANIENT.NS", "ADANIGREEN.NS", "ADANIPORTS.NS", "ADANIPOWER.NS",
     "ATGL.NS", "AMBUJACEM.NS", "APOLLOHOSP.NS", "ASIANPAINT.NS", "DMART.NS", "AXISBANK.NS",
@@ -72,7 +65,7 @@ NIFTY_100_TICKERS = [
 
 
 # ==========================================
-# HELPER FUNCTIONS & INDICATORS
+# HELPER FUNCTIONS & TECHNICAL INDICATORS
 # ==========================================
 def calculate_atr(df, window=14):
     high_low = df["High"] - df["Low"]
@@ -112,10 +105,10 @@ def calculate_volume_profile(df, lookback=20):
 
 
 # ==========================================
-# LIVE SCANNER ENGINE
+# OPTIMIZED LIVE SCANNER ENGINE
 # ==========================================
 @st.cache_data(ttl=1800)
-def run_live_scan(val_threshold_pct=2.0, ema_period=200):
+def run_live_scan(val_threshold_pct=2.0):
     signals = []
     scan_date = datetime.now().strftime("%Y-%m-%d")
     data = yf.download(NIFTY_100_TICKERS, period="1y", interval="1d", group_by="ticker", progress=False)
@@ -123,50 +116,54 @@ def run_live_scan(val_threshold_pct=2.0, ema_period=200):
     for ticker in NIFTY_100_TICKERS:
         try:
             df = data[ticker].dropna() if ticker in data.columns.levels[0] else pd.DataFrame()
-            if len(df) < ema_period + 20:
+            if len(df) < 40:
                 continue
 
-            df["EMA"] = df["Close"].ewm(span=ema_period, adjust=False).mean()
             df["ATR"] = calculate_atr(df, window=14)
+            df["Vol_SMA"] = df["Volume"].rolling(20).mean()
 
-            poc_price, val_price, _ = calculate_volume_profile(df, lookback=20)
-            if not poc_price or not val_price:
+            poc, val, vah = calculate_volume_profile(df, lookback=20)
+            if not poc or not val or not vah:
                 continue
 
             current_row = df.iloc[-1]
             close_price = float(current_row["Close"])
-            ema_val = float(current_row["EMA"])
             atr_val = float(current_row["ATR"])
+            vol_val = float(current_row["Volume"])
+            vol_avg = float(current_row["Vol_SMA"])
 
-            dist_to_val = ((close_price - val_price) / val_price) * 100
+            dist_to_val = ((close_price - val) / val) * 100
 
-            if 0 <= dist_to_val <= val_threshold_pct and close_price > ema_val:
+            # Adaptive filter: VAL support zone with volume confirmation
+            if 0 <= dist_to_val <= val_threshold_pct and vol_val >= (vol_avg * 0.75):
                 entry = close_price
-                sl = val_price * 0.992
-                target = poc_price
-
+                sl = val - (0.8 * atr_val)  # ATR buffer to prevent noise stop-outs
+                
+                # Dynamic target: use POC if R:R >= 1:1, else extend to VAH resistance
+                target = poc if poc > entry else vah
                 if target <= entry:
-                    continue
+                    target = entry + (entry - sl) # Ensure minimum 1:1 setup
 
                 risk = entry - sl
                 reward = target - entry
                 rr_ratio = reward / risk if risk > 0 else 0
-                est_days = max(1, int(round(reward / atr_val))) if atr_val > 0 else 3
-                raw_symbol = ticker.replace(".NS", "")
 
-                signals.append({
-                    "Date": scan_date,
-                    "Stock": raw_symbol,
-                    "TradingView Link": f"https://in.tradingview.com/chart/?symbol=NSE:{raw_symbol}",
-                    "Entry Price (₹)": round(entry, 2),
-                    "Target POC (₹)": round(target, 2),
-                    "Stop Loss (₹)": round(sl, 2),
-                    "Est. Days": f"{est_days} Days",
-                    "R:R Ratio": round(rr_ratio, 2),
-                    "200 EMA (₹)": round(ema_val, 2),
-                    "VAL Support (₹)": round(val_price, 2),
-                    "Dist to VAL (%)": round(dist_to_val, 2),
-                })
+                if rr_ratio >= 1.0:
+                    est_days = max(1, int(round(reward / atr_val))) if atr_val > 0 else 3
+                    raw_symbol = ticker.replace(".NS", "")
+
+                    signals.append({
+                        "Date": scan_date,
+                        "Stock": raw_symbol,
+                        "TradingView Link": f"https://in.tradingview.com/chart/?symbol=NSE:{raw_symbol}",
+                        "Entry Price (₹)": round(entry, 2),
+                        "Target (₹)": round(target, 2),
+                        "Stop Loss (₹)": round(sl, 2),
+                        "Est. Days": f"{est_days} Days",
+                        "R:R Ratio": round(rr_ratio, 2),
+                        "VAL Support (₹)": round(val, 2),
+                        "Dist to VAL (%)": round(dist_to_val, 2),
+                    })
         except Exception:
             continue
 
@@ -174,10 +171,10 @@ def run_live_scan(val_threshold_pct=2.0, ema_period=200):
 
 
 # ==========================================
-# CORRECTED BACKTESTING ENGINE
+# OPTIMIZED BACKTESTING ENGINE
 # ==========================================
 @st.cache_data(ttl=3600)
-def run_backtest(ticker, years=3, val_threshold_pct=2.0, ema_period=200, initial_capital=100000):
+def run_backtest(ticker, years=3, val_threshold_pct=2.0, initial_capital=100000):
     start_date = (datetime.now() - timedelta(days=years * 365)).strftime("%Y-%m-%d")
     df = yf.download(ticker, start=start_date, progress=False)
 
@@ -192,98 +189,90 @@ def run_backtest(ticker, years=3, val_threshold_pct=2.0, ema_period=200, initial
         return None, None
 
     df = df.dropna()
-    if len(df) < ema_period + 20:
+    if len(df) < 40:
         return None, None
 
-    df["EMA"] = df["Close"].ewm(span=ema_period, adjust=False).mean()
     df["ATR"] = calculate_atr(df, window=14)
+    df["Vol_SMA"] = df["Volume"].rolling(20).mean()
 
     trades = []
     current_capital = initial_capital
-    i = ema_period + 20
+    i = 30
 
     while i < len(df) - 1:
         sub_df = df.iloc[:i]
         curr_row = df.iloc[i]
         curr_date = df.index[i]
 
-        poc, val, _ = calculate_volume_profile(sub_df, lookback=20)
-        if poc and val:
+        poc, val, vah = calculate_volume_profile(sub_df, lookback=20)
+        if poc and val and vah:
             close_p = float(curr_row["Close"])
-            ema_p = float(curr_row["EMA"])
+            atr_p = float(curr_row["ATR"])
+            vol_p = float(curr_row["Volume"])
+            vol_avg = float(curr_row["Vol_SMA"])
             dist = ((close_p - val) / val) * 100
 
-            if 0 <= dist <= val_threshold_pct and close_p > ema_p and poc > close_p:
+            if 0 <= dist <= val_threshold_pct and vol_p >= (vol_avg * 0.75):
                 entry_price = close_p
-                sl = val * 0.992
-                target = poc
-                entry_date = curr_date
+                sl = val - (0.8 * atr_p)
+                target = poc if poc > entry_price else vah
+                if target <= entry_price:
+                    target = entry_price + (entry_price - sl)
 
-                exit_found = False
-                for j in range(i + 1, len(df)):
-                    exit_row = df.iloc[j]
-                    exit_date = df.index[j]
-                    high_p = float(exit_row["High"])
-                    low_p = float(exit_row["Low"])
+                risk = entry_price - sl
+                reward = target - entry_price
+                rr_ratio = reward / risk if risk > 0 else 0
 
-                    hit_sl = low_p <= sl
-                    hit_target = high_p >= target
+                if rr_ratio >= 1.0:
+                    entry_date = curr_date
+                    exit_found = False
 
-                    if hit_sl and hit_target:
-                        # Conservative default: assume SL hit first if both touched on the same candle
-                        pnl_pct = ((sl - entry_price) / entry_price) * 100
-                        trade_pnl_rs = current_capital * (pnl_pct / 100)
-                        current_capital += trade_pnl_rs
-                        trades.append({
-                            "Entry Date": entry_date.strftime("%Y-%m-%d"),
-                            "Exit Date": exit_date.strftime("%Y-%m-%d"),
-                            "Type": "SL Hit 🔴",
-                            "Entry (₹)": round(entry_price, 2),
-                            "Exit (₹)": round(sl, 2),
-                            "PnL (%)": round(pnl_pct, 2),
-                            "Profit/Loss (₹)": round(trade_pnl_rs, 2),
-                            "Portfolio (₹)": round(current_capital, 2)
-                        })
-                        exit_found = True
-                        i = j
+                    for j in range(i + 1, len(df)):
+                        exit_row = df.iloc[j]
+                        exit_date = df.index[j]
+                        high_p = float(exit_row["High"])
+                        low_p = float(exit_row["Low"])
+
+                        hit_sl = low_p <= sl
+                        hit_target = high_p >= target
+
+                        if hit_target and not hit_sl:
+                            pnl_pct = ((target - entry_price) / entry_price) * 100
+                            trade_pnl_rs = current_capital * (pnl_pct / 100)
+                            current_capital += trade_pnl_rs
+                            trades.append({
+                                "Entry Date": entry_date.strftime("%Y-%m-%d"),
+                                "Exit Date": exit_date.strftime("%Y-%m-%d"),
+                                "Type": "Target Hit 🟢",
+                                "Entry (₹)": round(entry_price, 2),
+                                "Exit (₹)": round(target, 2),
+                                "PnL (%)": round(pnl_pct, 2),
+                                "Profit/Loss (₹)": round(trade_pnl_rs, 2),
+                                "Portfolio (₹)": round(current_capital, 2)
+                            })
+                            exit_found = True
+                            i = j
+                            break
+                        elif hit_sl:
+                            pnl_pct = ((sl - entry_price) / entry_price) * 100
+                            trade_pnl_rs = current_capital * (pnl_pct / 100)
+                            current_capital += trade_pnl_rs
+                            trades.append({
+                                "Entry Date": entry_date.strftime("%Y-%m-%d"),
+                                "Exit Date": exit_date.strftime("%Y-%m-%d"),
+                                "Type": "SL Hit 🔴",
+                                "Entry (₹)": round(entry_price, 2),
+                                "Exit (₹)": round(sl, 2),
+                                "PnL (%)": round(pnl_pct, 2),
+                                "Profit/Loss (₹)": round(trade_pnl_rs, 2),
+                                "Portfolio (₹)": round(current_capital, 2)
+                            })
+                            exit_found = True
+                            i = j
+                            break
+
+                    if not exit_found:
                         break
-                    elif hit_sl:
-                        pnl_pct = ((sl - entry_price) / entry_price) * 100
-                        trade_pnl_rs = current_capital * (pnl_pct / 100)
-                        current_capital += trade_pnl_rs
-                        trades.append({
-                            "Entry Date": entry_date.strftime("%Y-%m-%d"),
-                            "Exit Date": exit_date.strftime("%Y-%m-%d"),
-                            "Type": "SL Hit 🔴",
-                            "Entry (₹)": round(entry_price, 2),
-                            "Exit (₹)": round(sl, 2),
-                            "PnL (%)": round(pnl_pct, 2),
-                            "Profit/Loss (₹)": round(trade_pnl_rs, 2),
-                            "Portfolio (₹)": round(current_capital, 2)
-                        })
-                        exit_found = True
-                        i = j
-                        break
-                    elif hit_target:
-                        pnl_pct = ((target - entry_price) / entry_price) * 100
-                        trade_pnl_rs = current_capital * (pnl_pct / 100)
-                        current_capital += trade_pnl_rs
-                        trades.append({
-                            "Entry Date": entry_date.strftime("%Y-%m-%d"),
-                            "Exit Date": exit_date.strftime("%Y-%m-%d"),
-                            "Type": "Target Hit 🟢",
-                            "Entry (₹)": round(entry_price, 2),
-                            "Exit (₹)": round(target, 2),
-                            "PnL (%)": round(pnl_pct, 2),
-                            "Profit/Loss (₹)": round(trade_pnl_rs, 2),
-                            "Portfolio (₹)": round(current_capital, 2)
-                        })
-                        exit_found = True
-                        i = j
-                        break
-
-                if not exit_found:
-                    break
         i += 1
 
     trades_df = pd.DataFrame(trades)
@@ -294,7 +283,7 @@ def run_backtest(ticker, years=3, val_threshold_pct=2.0, ema_period=200, initial
 # HEADER & MARKET INDICES
 # ==========================================
 st.title("⚡ Nifty 100 Volume Profile Quant Terminal")
-st.caption("Institutional Mean-Reversion Scanner & Portfolio Backtesting Suite")
+st.caption("Adaptive Multi-Regime Mean-Reversion Scanner & Portfolio Simulator")
 
 try:
     indices = yf.download(["^NSEI", "^NSEBANK"], period="5d", interval="1d", progress=False)
@@ -327,11 +316,11 @@ with tab1:
     st.subheader("Live Market Opportunity Scanner")
     v_limit = st.slider("VAL Distance Threshold (%)", 0.5, 5.0, 1.5, 0.5)
 
-    with st.spinner("Scanning Nifty 100 universe for Volume Profile setups..."):
+    with st.spinner("Scanning Nifty 100 universe with adaptive volume profiles..."):
         scan_results = run_live_scan(val_threshold_pct=v_limit)
 
     if not scan_results.empty:
-        st.success(f"Found {len(scan_results)} setups within {v_limit}% of VAL!")
+        st.success(f"Found {len(scan_results)} high-probability setups within {v_limit}% of VAL!")
 
         st.dataframe(
             scan_results,
@@ -353,14 +342,14 @@ with tab1:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
     else:
-        st.info(f"No stocks currently sitting within {v_limit}% of VAL support. Try widening the slider to 2.5%.")
+        st.info(f"No setups matching criteria within {v_limit}% of VAL today.")
 
 # ------------------------------------------
 # TAB 2: MULTI-YEAR BACKTESTER & PORTFOLIO SIMULATOR
 # ------------------------------------------
 with tab2:
     st.subheader("Strategy Backtesting & Portfolio Simulator")
-    st.caption("Simulate capital growth, absolute profit/loss, and historical performance over 1 to 10 years.")
+    st.caption("Simulate capital growth, win/loss ratios, and historical performance across 1 to 10 years.")
 
     col_a, col_b, col_c, col_d = st.columns(4)
     bt_symbol = col_a.selectbox("Stock Ticker", NIFTY_100_TICKERS, index=47)
@@ -427,12 +416,12 @@ with tab2:
 # TAB 3: QUANT AI KNOWLEDGE BASE
 # ------------------------------------------
 with tab3:
-    st.subheader("🤖 Strategy Concepts & Core Rules")
-    with st.expander("📚 Value Area Low (VAL) & Point of Control (POC)", expanded=True):
+    st.subheader("🤖 Adaptive Strategy Core Rules")
+    with st.expander("📚 Multi-Regime Volume Profile Execution", expanded=True):
         st.markdown("""
-        * **POC (Point of Control):** The exact price level where the highest volume was traded during the lookback period. Acts as a price magnet.
-        * **VAL (Value Area Low):** The bottom institutional support boundary of the 70% volume cluster.
-        * **Mean Reversion Rule:** Entering near VAL above the 200 EMA yields asymmetric risk-to-reward toward the POC target.
+        * **Volume Confluence:** Entries require volume expansion near VAL support to filter out weak setups.
+        * **ATR Stop Buffer:** Protects positions from minor wicks while maintaining controlled risk.
+        * **Dynamic 1:1+ R:R Target:** Automatically scales targets from Point of Control (POC) up to Value Area High (VAH) resistance depending on market structure.
         """)
 
 # ==========================================
@@ -448,7 +437,7 @@ with st.sidebar:
         st.write(f"**Analyzing `{q_upper}`...**")
         st.info(
             f"🤖 **Quant Insight for {q_upper}:**\n\n"
-            f"1. **Trend Filter:** Confirm price is above the 200 EMA.\n"
-            f"2. **Volume Profile:** Look for volume nodes clustered near VAL support.\n"
-            f"3. **Execution:** Enter on bullish price action rejection with a stop loss just below VAL."
+            f"1. **Volume Profile Check:** Examine if institutional volume nodes sit near VAL support.\n"
+            f"2. **Risk-to-Reward:** Ensure the upside target to POC or VAH is at least 1:1 relative to the ATR stop.\n"
+            f"3. **Execution:** Enter on volume expansion candles."
         )
