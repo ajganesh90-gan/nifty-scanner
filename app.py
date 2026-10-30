@@ -135,22 +135,22 @@ def run_live_scan(val_threshold_pct=2.0):
 
             dist_to_val = ((close_price - val) / val) * 100
 
-            # Institutional Footprint: Must be in trend alignment (Close > EMA 50 > EMA 200)
+            # Trend Alignment: Close > EMA 50 > EMA 200
             is_institutional_trend = (close_price > ema_50) and (ema_50 > ema_200)
 
             if 0 <= dist_to_val <= val_threshold_pct and is_institutional_trend:
                 entry = close_price
-                sl = val - (1.0 * atr_val)  # Safe buffer below VAL support
+                sl = val - (1.5 * atr_val)  # Balanced buffer below VAL support
                 
-                target = poc if poc > entry else vah
+                target = vah if vah > entry else poc
                 if target <= entry:
-                    target = entry + (1.5 * (entry - sl)) # Ensure strong R:R
+                    target = entry + (1.5 * (entry - sl))
 
                 risk = entry - sl
                 reward = target - entry
                 rr_ratio = reward / risk if risk > 0 else 0
 
-                if rr_ratio >= 1.5:
+                if rr_ratio >= 1.2:
                     est_days = max(1, int(round(reward / atr_val))) if atr_val > 0 else 3
                     raw_symbol = ticker.replace(".NS", "")
 
@@ -219,8 +219,8 @@ def run_backtest(ticker, years=3, val_threshold_pct=2.0, initial_capital=100000)
 
             if 0 <= dist <= val_threshold_pct and is_institutional_trend:
                 entry_price = close_p
-                sl = val - (1.0 * atr_p)
-                target = poc if poc > entry_price else vah
+                sl = val - (1.5 * atr_p)
+                target = vah if vah > entry_price else poc
                 if target <= entry_price:
                     target = entry_price + (1.5 * (entry_price - sl))
 
@@ -228,7 +228,7 @@ def run_backtest(ticker, years=3, val_threshold_pct=2.0, initial_capital=100000)
                 reward = target - entry_price
                 rr_ratio = reward / risk if risk > 0 else 0
 
-                if rr_ratio >= 1.5:
+                if rr_ratio >= 1.2:
                     entry_date = curr_date
                     exit_found = False
 
