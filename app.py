@@ -1,9 +1,12 @@
 from datetime import datetime, timedelta
 import io
+import re
+import xml.etree.ElementTree as ET
 import numpy as np
 import openpyxl
 import pandas as pd
 import plotly.graph_objects as go
+import requests
 import streamlit as st
 import yfinance as yf
 
@@ -11,7 +14,7 @@ import yfinance as yf
 # PAGE CONFIGURATION & FUTURISTIC STYLING
 # ==========================================
 st.set_page_config(
-    page_title="Nifty 100 Quant Terminal",
+    page_title="Nifty Institutional Quant Terminal",
     page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -39,33 +42,75 @@ st.markdown(
 
     .stDataFrame { border-radius: 12px; border: 1px solid #1E2D40; overflow: hidden; }
     .stTextInput input, .stNumberInput input, .stSelectbox select { background-color: #121824; color: #FFFFFF; border: 1px solid #1E2D40; border-radius: 8px; }
+    
+    .news-card {
+        background: #121824;
+        border: 1px solid #1E2D40;
+        border-radius: 10px;
+        padding: 15px;
+        margin-bottom: 12px;
+    }
+    .badge-bull { background-color: #00E676; color: #000; padding: 3px 8px; border-radius: 4px; font-weight: 700; font-size: 0.75rem; }
+    .badge-bear { background-color: #FF5252; color: #FFF; padding: 3px 8px; border-radius: 4px; font-weight: 700; font-size: 0.75rem; }
+    .badge-neutral { background-color: #FFB300; color: #000; padding: 3px 8px; border-radius: 4px; font-weight: 700; font-size: 0.75rem; }
     </style>
 """,
     unsafe_allow_html=True,
 )
 
-NIFTY_100_TICKERS = [
-    "ABB.NS", "ACC.NS", "ADANIENT.NS", "ADANIGREEN.NS", "ADANIPORTS.NS", "ADANIPOWER.NS",
-    "ATGL.NS", "AMBUJACEM.NS", "APOLLOHOSP.NS", "ASIANPAINT.NS", "DMART.NS", "AXISBANK.NS",
-    "BAJAJ-AUTO.NS", "BAJFINANCE.NS", "BAJAJFINSV.NS", "BAJAJHLDNG.NS", "BANKBARODA.NS",
-    "BERGEPAINT.NS", "BEL.NS", "BHARATFORG.NS", "BPCL.NS", "BHARTIARTL.NS", "BOSCHLTD.NS",
-    "BRITANNIA.NS", "CANBK.NS", "CHOLAFIN.NS", "CIPLA.NS", "COALINDIA.NS", "COLPAL.NS",
-    "DLF.NS", "DABUR.NS", "DIVISLAB.NS", "DRREDDY.NS", "EICHERMOT.NS", "GAIL.NS", "GODREJCP.NS",
-    "GODREJPROP.NS", "GRASIM.NS", "HCLTECH.NS", "HDFCBANK.NS", "HDFCLIFE.NS", "HAVELLS.NS",
-    "HEROMOTOCO.NS", "HINDALCO.NS", "HAL.NS", "HINDUNILVR.NS", "ICICIBANK.NS", "ICICIGI.NS",
-    "ICICIPRULI.NS", "IOC.NS", "IRCTC.NS", "IRFC.NS", "ITC.NS", "INDUSINDBK.NS", "NAUKRI.NS",
-    "INFY.NS", "INDIGO.NS", "JSWSTEEL.NS", "JINDALSTEL.NS", "JIOFIN.NS", "KOTAKBANK.NS",
-    "LTIM.NS", "LT.NS", "LUPIN.NS", "M&M.NS", "MARUTI.NS", "MAXHEALTH.NS", "MSUMI.NS",
-    "NTPC.NS", "NESTLEIND.NS", "ONGC.NS", "PIDILITIND.NS", "PFC.NS", "POWERGRID.NS",
-    "PNB.NS", "RELIANCE.NS", "SBICARD.NS", "SBILIFE.NS", "SRF.NS", "MOTHERSON.NS", "SBIN.NS",
-    "SUNPHARMA.NS", "TVSMOTOR.NS", "TCS.NS", "TATACONSUM.NS", "TATAELXSI.NS", "TATAMOTORS.NS",
-    "TATAPOWER.NS", "TATASTEEL.NS", "TECHM.NS", "TITAN.NS", "TORNTPHARM.NS", "TRENT.NS",
-    "ULTRACEMCO.NS", "UNOMINDA.NS", "UPL.NS", "VBL.NS", "VEDL.NS", "WIPRO.NS", "ZOMATO.NS", "ZYDUSLIFE.NS",
+# ==========================================
+# INDEX UNIVERSE LISTS
+# ==========================================
+NIFTY_50_TICKERS = [
+    "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "ICICIBANK.NS", "HINDUNILVR.NS", "ITC.NS",
+    "SBIN.NS", "BHARTIARTL.NS", "LTIM.NS", "KOTAKBANK.NS", "LT.NS", "AXISBANK.NS", "HCLTECH.NS",
+    "ASIANPAINT.NS", "BAJFINANCE.NS", "MARUTI.NS", "SUNPHARMA.NS", "TITAN.NS", "ULTRACEMCO.NS",
+    "NTPC.NS", "TATAMOTORS.NS", "POWERGRID.NS", "M&M.NS", "BAJAJFINSV.NS", "TATASTEEL.NS",
+    "NESTLEIND.NS", "JSWSTEEL.NS", "ADANIENT.NS", "GRASIM.NS", "TECHM.NS", "ADANIPORTS.NS",
+    "HDFCLIFE.NS", "DRREDDY.NS", "DIVISLAB.NS", "BRITANNIA.NS", "EICHERMOT.NS", "SBILIFE.NS",
+    "COALINDIA.NS", "TATACONSUM.NS", "APOLLOHOSP.NS", "BAJAJ-AUTO.NS", "HEROMOTOCO.NS", "WIPRO.NS",
+    "HINDALCO.NS", "BPCL.NS", "CIPLA.NS", "ONGC.NS", "INDUSINDBK.NS", "UPL.NS"
 ]
 
+NIFTY_100_TICKERS = list(set(NIFTY_50_TICKERS + [
+    "ABB.NS", "ACC.NS", "ADANIGREEN.NS", "ADANIPOWER.NS", "ATGL.NS", "AMBUJACEM.NS", "DMART.NS",
+    "BAJAJHLDNG.NS", "BANKBARODA.NS", "BERGEPAINT.NS", "BEL.NS", "BHARATFORG.NS", "BOSCHLTD.NS",
+    "CANBK.NS", "CHOLAFIN.NS", "COLPAL.NS", "DLF.NS", "DABUR.NS", "GAIL.NS", "GODREJCP.NS",
+    "GODREJPROP.NS", "HAVELLS.NS", "HAL.NS", "ICICIGI.NS", "ICICIPRULI.NS", "IOC.NS", "IRCTC.NS",
+    "IRFC.NS", "NAUKRI.NS", "INDIGO.NS", "JINDALSTEL.NS", "JIOFIN.NS", "LUPIN.NS", "MAXHEALTH.NS",
+    "MSUMI.NS", "PIDILITIND.NS", "PFC.NS", "PNB.NS", "SBICARD.NS", "SRF.NS", "MOTHERSON.NS",
+    "TVSMOTOR.NS", "TATAELXSI.NS", "TATAPOWER.NS", "TECHM.NS", "TORNTPHARM.NS", "TRENT.NS",
+    "UNOMINDA.NS", "VBL.NS", "VEDL.NS", "ZOMATO.NS", "ZYDUSLIFE.NS"
+]))
+
+NIFTY_250_EXT = [
+    "AUBANK.NS", "AARTIIND.NS", "AIAENG.NS", "ALKEM.NS", "ASHOKLEY.NS", "ASTRAL.NS", "AUROPHARMA.NS",
+    "BALKRISIND.NS", "BANDHANBNK.NS", "BATAINDIA.NS", "BHARATFORG.NS", "BSOFT.NS", "CGPOWER.NS",
+    "COFORGE.NS", "CONCOR.NS", "CUMMINSIND.NS", "DEEPAKNTR.NS", "ESCORTS.NS", "FEDERALBNK.NS",
+    "FORTIS.NS", "GLENMARK.NS", "GMRINFRA.NS", "GUJGASLTD.NS", "IDFCFIRSTB.NS", "IPCALAB.NS",
+    "JOBR.NS", "KPITTECH.NS", "LICHSGFIN.NS", "MRF.NS", "M&MFIN.NS", "POLYCAB.NS", "RECLTD.NS",
+    "SUPREMEIND.NS", "VOLTAS.NS", "YESBANK.NS"
+]
+
+NIFTY_250_TICKERS = list(set(NIFTY_100_TICKERS + NIFTY_250_EXT))
+
+NIFTY_500_EXT = [
+    "ANGELONE.NS", "CDSL.NS", "CAMS.NS", "CYIENT.NS", "DELHIVERY.NS", "DEVYANI.NS", "EASEMYTRIP.NS",
+    "HFCL.NS", "IIFL.NS", "IEX.NS", "KEI.NS", "KFINTECH.NS", "MCX.NS", "NATIONALUM.NS", "NYKAA.NS",
+    "PAYTM.NS", "PVRINOX.NS", "RBLBANK.NS", "ROUTE.NS", "SUZLON.NS", "TATACOMM.NS", "TATAINVEST.NS"
+]
+
+NIFTY_500_TICKERS = list(set(NIFTY_250_TICKERS + NIFTY_500_EXT))
+
+UNIVERSE_MAP = {
+    "Nifty 50": NIFTY_50_TICKERS,
+    "Nifty 100": NIFTY_100_TICKERS,
+    "Nifty 250": NIFTY_250_TICKERS,
+    "Nifty 500": NIFTY_500_TICKERS
+}
 
 # ==========================================
-# HELPER FUNCTIONS & TECHNICAL INDICATORS
+# HELPER FUNCTIONS & INDICATORS
 # ==========================================
 def calculate_atr(df, window=14):
     high_low = df["High"] - df["Low"]
@@ -105,17 +150,17 @@ def calculate_volume_profile(df, lookback=20):
 
 
 # ==========================================
-# ADVANCED MULTI-STOCK SCANNER ENGINE
+# LIVE MULTI-UNIVERSE SCANNER ENGINE
 # ==========================================
 @st.cache_data(ttl=1800)
-def run_live_scan(val_threshold_pct=1.0, atr_multiplier=1.2, min_rr=1.0):
+def run_live_scan(ticker_list, val_threshold_pct=1.0, atr_multiplier=1.2, min_rr=1.0):
     signals = []
     scan_date = datetime.now().strftime("%Y-%m-%d")
-    data = yf.download(NIFTY_100_TICKERS, period="1y", interval="1d", group_by="ticker", progress=False)
+    data = yf.download(ticker_list, period="1y", interval="1d", group_by="ticker", progress=False)
 
-    for ticker in NIFTY_100_TICKERS:
+    for ticker in ticker_list:
         try:
-            df = data[ticker].dropna() if ticker in data.columns.levels[0] else pd.DataFrame()
+            df = data[ticker].dropna() if (len(ticker_list) > 1 and ticker in data.columns.levels[0]) else (data.dropna() if len(ticker_list) == 1 else pd.DataFrame())
             if len(df) < 220:
                 continue
 
@@ -174,10 +219,10 @@ def run_live_scan(val_threshold_pct=1.0, atr_multiplier=1.2, min_rr=1.0):
 
 
 # ==========================================
-# BACKTESTING ENGINE WITH PARAMETERS
+# BACKTESTING ENGINE WITH SINGLE & ALL-STOCKS OPTION
 # ==========================================
 @st.cache_data(ttl=3600)
-def run_backtest(ticker, years=3, val_threshold_pct=1.0, atr_multiplier=1.2, min_rr=1.0, initial_capital=100000):
+def run_backtest_single(ticker, years=3, val_threshold_pct=1.0, atr_multiplier=1.2, min_rr=1.0, initial_capital=100000):
     start_date = (datetime.now() - timedelta(days=years * 365)).strftime("%Y-%m-%d")
     df = yf.download(ticker, start=start_date, progress=False)
 
@@ -249,6 +294,7 @@ def run_backtest(ticker, years=3, val_threshold_pct=1.0, atr_multiplier=1.2, min
                             trade_pnl_rs = current_capital * (pnl_pct / 100)
                             current_capital += trade_pnl_rs
                             trades.append({
+                                "Stock": ticker.replace(".NS", ""),
                                 "Entry Date": entry_date.strftime("%Y-%m-%d"),
                                 "Exit Date": exit_date.strftime("%Y-%m-%d"),
                                 "Type": "Target Hit 🟢",
@@ -266,6 +312,7 @@ def run_backtest(ticker, years=3, val_threshold_pct=1.0, atr_multiplier=1.2, min
                             trade_pnl_rs = current_capital * (pnl_pct / 100)
                             current_capital += trade_pnl_rs
                             trades.append({
+                                "Stock": ticker.replace(".NS", ""),
                                 "Entry Date": entry_date.strftime("%Y-%m-%d"),
                                 "Exit Date": exit_date.strftime("%Y-%m-%d"),
                                 "Type": "SL Hit 🔴",
@@ -287,11 +334,93 @@ def run_backtest(ticker, years=3, val_threshold_pct=1.0, atr_multiplier=1.2, min
     return trades_df, df
 
 
+@st.cache_data(ttl=3600)
+def run_universe_backtest(universe_name, years=3, val_threshold_pct=1.0, atr_multiplier=1.2, min_rr=1.0, initial_capital=100000):
+    tickers = UNIVERSE_MAP.get(universe_name, NIFTY_100_TICKERS)
+    summary_list = []
+    all_trades = []
+
+    progress_bar = st.progress(0)
+    for idx, t in enumerate(tickers):
+        progress_bar.progress((idx + 1) / len(tickers))
+        t_df, _ = run_backtest_single(t, years, val_threshold_pct, atr_multiplier, min_rr, initial_capital)
+        if t_df is not None and not t_df.empty:
+            all_trades.append(t_df)
+            total_t = len(t_df)
+            wins = len(t_df[t_df["Type"] == "Target Hit 🟢"])
+            win_r = round((wins / total_t) * 100, 1)
+            tot_pnl = round(t_df["PnL (%)"].sum(), 2)
+            summary_list.append({
+                "Stock": t.replace(".NS", ""),
+                "Total Signals": total_t,
+                "Win Rate (%)": f"{win_r}%",
+                "Total Return (%)": f"{tot_pnl:+.2f}%",
+                "Final Value (₹)": round(float(t_df["Portfolio (₹)"].iloc[-1]), 2)
+            })
+
+    progress_bar.empty()
+    summary_df = pd.DataFrame(summary_list)
+    combined_trades_df = pd.concat(all_trades, ignore_index=True) if all_trades else pd.DataFrame()
+    return summary_df, combined_trades_df
+
+
+# ==========================================
+# NEWS & AI IMPACT ENGINE
+# ==========================================
+@st.cache_data(ttl=1800)
+def fetch_breaking_news():
+    news_items = []
+    rss_urls = [
+        "https://www.moneycontrol.com/rss/MCtopnews.xml",
+        "https://economictimes.indiatimes.com/markets/rssfeeds/2146842.cms"
+    ]
+    
+    for url in rss_urls:
+        try:
+            res = requests.get(url, timeout=5)
+            root = ET.fromstring(res.content)
+            for item in root.findall(".//item")[:5]:
+                title = item.find("title").text if item.find("title") is not None else ""
+                desc = item.find("description").text if item.find("description") is not None else ""
+                clean_desc = re.sub("<.*?>", "", desc or "")
+                
+                # Sentiment & Stock Impact Analysis Logic
+                sentiment = "NEUTRAL"
+                badge_class = "badge-neutral"
+                if any(w in (title + clean_desc).lower() for w in ["profit", "surges", "jumps", "rally", "record", "growth", "high"]):
+                    sentiment = "BULLISH"
+                    badge_class = "badge-bull"
+                elif any(w in (title + clean_desc).lower() for w in ["drop", "falls", "slumps", "loss", "crash", "war", "inflation"]):
+                    sentiment = "BEARISH"
+                    badge_class = "badge-bear"
+
+                # Identify impacted sectors/stocks
+                impacted = []
+                if "bank" in (title + clean_desc).lower(): impacted.append("Bank Nifty (HDFCBANK, ICICIBANK, SBIN)")
+                if "it" in (title + clean_desc).lower() or "tech" in (title + clean_desc).lower(): impacted.append("IT Sector (TCS, INFY, HCLTECH)")
+                if "auto" in (title + clean_desc).lower(): impacted.append("Auto (TATAMOTORS, MARUTI, M&M)")
+                if "oil" in (title + clean_desc).lower() or "crude" in (title + clean_desc).lower(): impacted.append("Energy (RELIANCE, ONGC, BPCL)")
+                
+                impact_str = ", ".join(impacted) if impacted else "Broad Market Indices (Nifty 50 / Sensex)"
+
+                news_items.append({
+                    "title": title,
+                    "description": clean_desc[:150] + "...",
+                    "sentiment": sentiment,
+                    "badge": badge_class,
+                    "impact": impact_str
+                })
+        except Exception:
+            continue
+            
+    return news_items
+
+
 # ==========================================
 # HEADER & MARKET INDICES
 # ==========================================
-st.title("⚡ Nifty 100 Volume Profile Quant Terminal")
-st.caption("Multi-Stock Institutional Mean-Reversion Suite")
+st.title("⚡ Nifty Multi-Universe Quant Terminal")
+st.caption("Volume Profile Mean-Reversion Terminal & Global Intelligence Engine")
 
 try:
     indices = yf.download(["^NSEI", "^NSEBANK"], period="5d", interval="1d", progress=False)
@@ -315,16 +444,18 @@ st.divider()
 # ==========================================
 # TABS INTERFACE
 # ==========================================
-tab1, tab2, tab3 = st.tabs(["🚀 Live Multi-Stock Scanner", "📊 Strategy Backtester", "🤖 Quant AI Intelligence"])
+tab1, tab2, tab3 = st.tabs(["🚀 Live Multi-Universe Scanner", "📊 Universe Strategy Backtester", "📰 Market News & Impact Analysis"])
 
 # ------------------------------------------
-# TAB 1: LIVE MULTI-STOCK SCANNER
+# TAB 1: LIVE MULTI-UNIVERSE SCANNER
 # ------------------------------------------
 with tab1:
-    st.subheader("Nifty 100 Multi-Stock Parameter Engine")
+    st.subheader("Nifty Multi-Index Scanner Engine")
     
-    reset_defaults = st.checkbox("🎯 Reset to 60% Win-Rate Optimal Defaults (VAL: 1.0%, ATR: 1.2x, R:R: 1.0)", value=True, key="live_reset")
-    
+    col_u1, col_u2 = st.columns([1, 2])
+    selected_universe = col_u1.selectbox("Select Index Universe", ["Nifty 50", "Nifty 100", "Nifty 250", "Nifty 500"], index=1)
+    reset_defaults = col_u2.checkbox("🎯 Reset to 60% Win-Rate Optimal Defaults (VAL: 1.0%, ATR: 1.2x, R:R: 1.0)", value=True, key="live_reset")
+
     default_val = 1.0 if reset_defaults else 2.5
     default_atr = 1.2 if reset_defaults else 1.2
     default_rr = 1.0 if reset_defaults else 1.0
@@ -334,11 +465,13 @@ with tab1:
     atr_mult = col_p2.slider("ATR Stop Buffer Multiplier", 0.8, 2.5, default_atr, 0.1, key="live_atr")
     min_rr_param = col_p3.slider("Minimum R:R Ratio", 0.8, 2.0, default_rr, 0.1, key="live_rr")
 
-    with st.spinner("Scanning Nifty 100 universe across all stocks..."):
-        scan_results = run_live_scan(val_threshold_pct=v_limit, atr_multiplier=atr_mult, min_rr=min_rr_param)
+    target_tickers = UNIVERSE_MAP[selected_universe]
+
+    with st.spinner(f"Scanning {len(target_tickers)} stocks across {selected_universe}..."):
+        scan_results = run_live_scan(target_tickers, val_threshold_pct=v_limit, atr_multiplier=atr_mult, min_rr=min_rr_param)
 
     if not scan_results.empty:
-        st.success(f"Found {len(scan_results)} setups across the Nifty 100 universe!")
+        st.success(f"Found {len(scan_results)} setups across {selected_universe} universe!")
 
         st.dataframe(
             scan_results,
@@ -351,102 +484,116 @@ with tab1:
 
         excel_buffer = io.BytesIO()
         with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
-            scan_results.to_excel(writer, index=False, sheet_name="MultiStock_Setups")
+            scan_results.to_excel(writer, index=False, sheet_name="LiveSetups")
 
         st.download_button(
-            "📥 Export Multi-Stock Report to Excel",
+            "📥 Export Report to Excel",
             data=excel_buffer.getvalue(),
-            file_name=f"Nifty100_MultiStock_Scan_{datetime.now().strftime('%Y%m%d')}.xlsx",
+            file_name=f"{selected_universe}_Scan_{datetime.now().strftime('%Y%m%d')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
     else:
-        st.info(f"No setups matching current parameters. Try unchecking reset or adjusting sliders.")
+        st.info(f"No setups matching current parameters in {selected_universe}. Try unchecking reset or widening sliders.")
 
 # ------------------------------------------
-# TAB 2: MULTI-YEAR BACKTESTER & PORTFOLIO SIMULATOR
+# TAB 2: UNIVERSE BACKTESTER
 # ------------------------------------------
 with tab2:
-    st.subheader("Strategy Backtesting & Portfolio Simulator")
-    st.caption("Simulate capital growth, win/loss ratios, and historical performance across 1 to 10 years.")
-
+    st.subheader("Multi-Stock & Index Backtester")
+    
+    bt_mode = st.radio("Backtest Mode", ["Single Stock", "Scan Entire Index Universe"], horizontal=True)
+    
     reset_bt = st.checkbox("🎯 Reset Backtest to 60% Win-Rate Optimal Defaults", value=True, key="bt_reset")
     bt_def_val = 1.0 if reset_bt else 2.5
     bt_def_atr = 1.2 if reset_bt else 1.2
     bt_def_rr = 1.0 if reset_bt else 1.0
 
-    col_a, col_b, col_c, col_d, col_e, col_f = st.columns(6)
-    bt_symbol = col_a.selectbox("Stock Ticker", NIFTY_100_TICKERS, index=47)
-    initial_cap = col_b.number_input("Capital (₹)", value=100000, step=10000, format="%d")
-    bt_years = col_c.slider("Period", 1, 10, 3)
-    bt_threshold = col_d.slider("VAL %", 0.5, 5.0, bt_def_val, 0.5, key="bt_val")
-    bt_atr = col_e.slider("ATR Mult", 0.8, 2.0, bt_def_atr, 0.1, key="bt_atr")
-    bt_rr = col_f.slider("Min R:R", 0.8, 2.0, bt_def_rr, 0.1, key="bt_rr")
+    if bt_mode == "Single Stock":
+        col_a, col_b, col_c, col_d, col_e, col_f = st.columns(6)
+        bt_symbol = col_a.selectbox("Stock Ticker", NIFTY_500_TICKERS, index=47)
+        initial_cap = col_b.number_input("Capital (₹)", value=100000, step=10000, format="%d")
+        bt_years = col_c.slider("Period", 1, 10, 3)
+        bt_threshold = col_d.slider("VAL %", 0.5, 5.0, bt_def_val, 0.5, key="bt_val")
+        bt_atr = col_e.slider("ATR Mult", 0.8, 2.0, bt_def_atr, 0.1, key="bt_atr")
+        bt_rr = col_f.slider("Min R:R", 0.8, 2.0, bt_def_rr, 0.1, key="bt_rr")
 
-    if st.button("▶️ Run Backtest & Simulation", type="primary"):
-        with st.spinner(f"Simulating trades for {bt_symbol} across {bt_years} year(s)..."):
-            bt_df, price_df = run_backtest(
-                bt_symbol, years=bt_years, val_threshold_pct=bt_threshold, atr_multiplier=bt_atr, min_rr=bt_rr, initial_capital=initial_cap
-            )
+        if st.button("▶️ Run Single Stock Backtest", type="primary"):
+            with st.spinner(f"Simulating trades for {bt_symbol}..."):
+                bt_df, _ = run_backtest_single(bt_symbol, years=bt_years, val_threshold_pct=bt_threshold, atr_multiplier=bt_atr, min_rr=bt_rr, initial_capital=initial_cap)
 
-        if bt_df is not None and not bt_df.empty:
-            total_trades = len(bt_df)
-            wins = len(bt_df[bt_df["Type"] == "Target Hit 🟢"])
-            losses = len(bt_df[bt_df["Type"] == "SL Hit 🔴"])
+            if bt_df is not None and not bt_df.empty:
+                total_trades = len(bt_df)
+                wins = len(bt_df[bt_df["Type"] == "Target Hit 🟢"])
+                losses = len(bt_df[bt_df["Type"] == "SL Hit 🔴"])
+                win_rate = (wins / total_trades) * 100 if total_trades > 0 else 0
+                final_portfolio = float(bt_df["Portfolio (₹)"].iloc[-1])
+                net_profit_rs = final_portfolio - initial_cap
+                total_return_pct = (net_profit_rs / initial_cap) * 100
 
-            win_rate = (wins / total_trades) * 100 if total_trades > 0 else 0
-            
-            final_portfolio = float(bt_df["Portfolio (₹)"].iloc[-1])
-            net_profit_rs = final_portfolio - initial_cap
-            total_return_pct = (net_profit_rs / initial_cap) * 100
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Initial Investment", f"₹{initial_cap:,.0f}")
+                m2.metric("Final Portfolio", f"₹{final_portfolio:,.2f}", f"{total_return_pct:+.2f}%")
+                m3.metric("Net Profit/Loss", f"₹{net_profit_rs:,.2f}")
+                m4.metric("Win Rate (%)", f"{win_rate:.1f}% ({wins}W / {losses}L)")
 
-            start_date_str = str(bt_df["Entry Date"].min())
-            end_date_str = str(bt_df["Exit Date"].max())
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=bt_df["Exit Date"], y=bt_df["Portfolio (₹)"], mode="lines+markers", line=dict(color="#00E5FF", width=3)))
+                fig.update_layout(title=f"{bt_symbol} Portfolio Growth", template="plotly_dark")
+                st.plotly_chart(fig, use_container_width=True)
 
-            st.markdown("### 📈 Performance & Capital Summary")
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Initial Investment", f"₹{initial_cap:,.0f}")
-            m2.metric("Final Portfolio Value", f"₹{final_portfolio:,.2f}", f"{total_return_pct:+.2f}%")
-            m3.metric("Net Profit / Loss (₹)", f"₹{net_profit_rs:,.2f}")
-            m4.metric("Win Rate (%)", f"{win_rate:.1f}% ({wins}W / {losses}L)")
+                st.dataframe(bt_df, use_container_width=True, hide_index=True)
+            else:
+                st.warning("No trades triggered for this ticker in the chosen window.")
 
-            st.caption(f"📅 **Backtest Period:** `{start_date_str}` to `{end_date_str}` ({bt_years} Years Active Simulation)")
+    else:
+        col_x, col_y, col_z = st.columns(3)
+        bt_universe = col_x.selectbox("Select Index Universe to Backtest", ["Nifty 50", "Nifty 100", "Nifty 250", "Nifty 500"], index=1)
+        bt_years = col_y.slider("Lookback Period (Years)", 1, 10, 3)
+        initial_cap = col_z.number_input("Capital per Stock (₹)", value=100000, step=10000, format="%d")
 
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=bt_df["Exit Date"],
-                y=bt_df["Portfolio (₹)"],
-                mode="lines+markers",
-                name="Portfolio Value",
-                line=dict(color="#00E5FF", width=3),
-                fill="tozeroy",
-                fillcolor="rgba(0, 229, 255, 0.05)"
-            ))
-            fig.update_layout(
-                title=f"{bt_symbol} Portfolio Growth Curve (₹{initial_cap:,} Start)",
-                template="plotly_dark",
-                xaxis_title="Exit Date",
-                yaxis_title="Portfolio Value (₹)",
-                paper_bgcolor="#0E1117",
-                plot_bgcolor="#0E1117",
-            )
-            st.plotly_chart(fig, use_container_width=True)
+        if st.button(f"▶️ Run Full {bt_universe} Universe Scan", type="primary"):
+            st.info(f"Scanning all constituent stocks in {bt_universe} over {bt_years} years. Please wait...")
+            summary_df, combined_df = run_universe_backtest(bt_universe, years=bt_years, val_threshold_pct=bt_def_val, atr_multiplier=bt_def_atr, min_rr=bt_def_rr, initial_capital=initial_cap)
 
-            st.subheader("Detailed Trade Execution Log")
-            st.dataframe(bt_df, use_container_width=True, hide_index=True)
-        else:
-            st.warning(f"No trades triggered for {bt_symbol} in the selected timeframe. Try adjusting parameters or ticker.")
+            if not summary_df.empty:
+                st.success(f"Universe Scan Complete! Found signals in {len(summary_df)} stocks.")
+                st.subheader("📌 Stocks Generating Signals Summary")
+                st.dataframe(summary_df, use_container_width=True, hide_index=True)
+
+                st.subheader("📜 Complete Signal Trade Execution Log")
+                st.dataframe(combined_df, use_container_width=True, hide_index=True)
+            else:
+                st.warning("No signals found across this universe with current settings.")
 
 # ------------------------------------------
-# TAB 3: QUANT AI KNOWLEDGE BASE
+# TAB 3: MARKET NEWS & IMPACT ANALYSIS
 # ------------------------------------------
 with tab3:
-    st.subheader("🤖 Multi-Stock Strategy Core Rules")
-    with st.expander("📚 Signal Tuning Guidelines", expanded=True):
-        st.markdown("""
-        * **Reset Checkbox:** Automatically snaps settings to target the 60% win-rate institutional sweet spot.
-        * **VAL Distance Threshold:** 1.0% locks in precise institutional floor entries.
-        * **ATR Stop Multiplier:** 1.2x protects trades from daily price wicks while managing risk.
-        """)
+    st.subheader("📰 Real-Time Global & Local Financial News")
+    st.caption("AI-extracted market sentiment and stock impact mapping")
+
+    if st.button("🔄 Refresh Market News"):
+        st.cache_data.clear()
+
+    news_data = fetch_breaking_news()
+
+    if news_data:
+        for item in news_data:
+            st.markdown(
+                f"""
+                <div class="news-card">
+                    <span class="{item['badge']}">{item['sentiment']}</span>
+                    <h4 style="margin: 8px 0; color: #FFFFFF;">{item['title']}</h4>
+                    <p style="color: #94A3B8; font-size: 0.9rem;">{item['description']}</p>
+                    <div style="margin-top: 8px; font-size: 0.85rem; color: #00E5FF;">
+                        <strong>🎯 Impacted Stocks / Sectors:</strong> {item['impact']}
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+    else:
+        st.info("Unable to fetch live news feeds at the moment. Please try refreshing.")
 
 # ==========================================
 # SIDEBAR AI QUANT ASSISTANT
@@ -461,7 +608,6 @@ with st.sidebar:
         st.write(f"**Analyzing `{q_upper}`...**")
         st.info(
             f"🤖 **Quant Insight for {q_upper}:**\n\n"
-            f"1. **Optimal Defaults:** Use the reset checkbox to instantly configure 60% win-rate parameters.\n"
-            f"2. **Multi-Stock Diversification:** Spread capital across multiple Nifty 100 setups.\n"
-            f"3. **Execution:** Always verify trend alignment before entry."
+            f"1. **Universe Filtering:** Use Nifty 50/100 for high liquidity or Nifty 250/500 for high-beta momentum.\n"
+            f"2. **Impact Tracking:** Check the News tab to ensure macro news aligns with your technical setups."
         )
