@@ -105,7 +105,7 @@ def calculate_volume_profile(df, lookback=20):
 
 
 # ==========================================
-# OPTIMIZED LIVE SCANNER ENGINE
+# INSTITUTIONAL SCANNER ENGINE
 # ==========================================
 @st.cache_data(ttl=1800)
 def run_live_scan(val_threshold_pct=2.0):
@@ -116,11 +116,12 @@ def run_live_scan(val_threshold_pct=2.0):
     for ticker in NIFTY_100_TICKERS:
         try:
             df = data[ticker].dropna() if ticker in data.columns.levels[0] else pd.DataFrame()
-            if len(df) < 40:
+            if len(df) < 220:
                 continue
 
+            df["EMA_50"] = df["Close"].ewm(span=50, adjust=False).mean()
+            df["EMA_200"] = df["Close"].ewm(span=200, adjust=False).mean()
             df["ATR"] = calculate_atr(df, window=14)
-            df["Vol_SMA"] = df["Volume"].rolling(20).mean()
 
             poc, val, vah = calculate_volume_profile(df, lookback=20)
             if not poc or not val or not vah:
@@ -128,27 +129,28 @@ def run_live_scan(val_threshold_pct=2.0):
 
             current_row = df.iloc[-1]
             close_price = float(current_row["Close"])
+            ema_50 = float(current_row["EMA_50"])
+            ema_200 = float(current_row["EMA_200"])
             atr_val = float(current_row["ATR"])
-            vol_val = float(current_row["Volume"])
-            vol_avg = float(current_row["Vol_SMA"])
 
             dist_to_val = ((close_price - val) / val) * 100
 
-            # Adaptive filter: VAL support zone with volume confirmation
-            if 0 <= dist_to_val <= val_threshold_pct and vol_val >= (vol_avg * 0.75):
+            # Institutional Footprint: Must be in trend alignment (Close > EMA 50 > EMA 200)
+            is_institutional_trend = (close_price > ema_50) and (ema_50 > ema_200)
+
+            if 0 <= dist_to_val <= val_threshold_pct and is_institutional_trend:
                 entry = close_price
-                sl = val - (0.8 * atr_val)  # ATR buffer to prevent noise stop-outs
+                sl = val - (1.0 * atr_val)  # Safe buffer below VAL support
                 
-                # Dynamic target: use POC if R:R >= 1:1, else extend to VAH resistance
                 target = poc if poc > entry else vah
                 if target <= entry:
-                    target = entry + (entry - sl) # Ensure minimum 1:1 setup
+                    target = entry + (1.5 * (entry - sl)) # Ensure strong R:R
 
                 risk = entry - sl
                 reward = target - entry
                 rr_ratio = reward / risk if risk > 0 else 0
 
-                if rr_ratio >= 1.0:
+                if rr_ratio >= 1.5:
                     est_days = max(1, int(round(reward / atr_val))) if atr_val > 0 else 3
                     raw_symbol = ticker.replace(".NS", "")
 
@@ -171,7 +173,7 @@ def run_live_scan(val_threshold_pct=2.0):
 
 
 # ==========================================
-# OPTIMIZED BACKTESTING ENGINE
+# INSTITUTIONAL BACKTESTING ENGINE
 # ==========================================
 @st.cache_data(ttl=3600)
 def run_backtest(ticker, years=3, val_threshold_pct=2.0, initial_capital=100000):
@@ -189,15 +191,16 @@ def run_backtest(ticker, years=3, val_threshold_pct=2.0, initial_capital=100000)
         return None, None
 
     df = df.dropna()
-    if len(df) < 40:
+    if len(df) < 220:
         return None, None
 
+    df["EMA_50"] = df["Close"].ewm(span=50, adjust=False).mean()
+    df["EMA_200"] = df["Close"].ewm(span=200, adjust=False).mean()
     df["ATR"] = calculate_atr(df, window=14)
-    df["Vol_SMA"] = df["Volume"].rolling(20).mean()
 
     trades = []
     current_capital = initial_capital
-    i = 30
+    i = 210
 
     while i < len(df) - 1:
         sub_df = df.iloc[:i]
@@ -207,23 +210,25 @@ def run_backtest(ticker, years=3, val_threshold_pct=2.0, initial_capital=100000)
         poc, val, vah = calculate_volume_profile(sub_df, lookback=20)
         if poc and val and vah:
             close_p = float(curr_row["Close"])
+            ema_50 = float(curr_row["EMA_50"])
+            ema_200 = float(curr_row["EMA_200"])
             atr_p = float(curr_row["ATR"])
-            vol_p = float(curr_row["Volume"])
-            vol_avg = float(curr_row["Vol_SMA"])
             dist = ((close_p - val) / val) * 100
 
-            if 0 <= dist <= val_threshold_pct and vol_p >= (vol_avg * 0.75):
+            is_institutional_trend = (close_p > ema_50) and (ema_50 > ema_200)
+
+            if 0 <= dist <= val_threshold_pct and is_institutional_trend:
                 entry_price = close_p
-                sl = val - (0.8 * atr_p)
+                sl = val - (1.0 * atr_p)
                 target = poc if poc > entry_price else vah
                 if target <= entry_price:
-                    target = entry_price + (entry_price - sl)
+                    target = entry_price + (1.5 * (entry_price - sl))
 
                 risk = entry_price - sl
                 reward = target - entry_price
                 rr_ratio = reward / risk if risk > 0 else 0
 
-                if rr_ratio >= 1.0:
+                if rr_ratio >= 1.5:
                     entry_date = curr_date
                     exit_found = False
 
@@ -283,7 +288,7 @@ def run_backtest(ticker, years=3, val_threshold_pct=2.0, initial_capital=100000)
 # HEADER & MARKET INDICES
 # ==========================================
 st.title("⚡ Nifty 100 Volume Profile Quant Terminal")
-st.caption("Adaptive Multi-Regime Mean-Reversion Scanner & Portfolio Simulator")
+st.caption("Institutional Trend-Aligned Mean-Reversion Suite")
 
 try:
     indices = yf.download(["^NSEI", "^NSEBANK"], period="5d", interval="1d", progress=False)
@@ -316,11 +321,11 @@ with tab1:
     st.subheader("Live Market Opportunity Scanner")
     v_limit = st.slider("VAL Distance Threshold (%)", 0.5, 5.0, 1.5, 0.5)
 
-    with st.spinner("Scanning Nifty 100 universe with adaptive volume profiles..."):
+    with st.spinner("Scanning Nifty 100 universe with institutional trend filters..."):
         scan_results = run_live_scan(val_threshold_pct=v_limit)
 
     if not scan_results.empty:
-        st.success(f"Found {len(scan_results)} high-probability setups within {v_limit}% of VAL!")
+        st.success(f"Found {len(scan_results)} high-probability institutional setups within {v_limit}% of VAL!")
 
         st.dataframe(
             scan_results,
@@ -338,11 +343,11 @@ with tab1:
         st.download_button(
             "📥 Export Setups to Excel",
             data=excel_buffer.getvalue(),
-            file_name=f"VP_Scan_{datetime.now().strftime('%Y%m%d')}.xlsx",
+            file_name=f"Institutional_VP_Scan_{datetime.now().strftime('%Y%m%d')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
     else:
-        st.info(f"No setups matching criteria within {v_limit}% of VAL today.")
+        st.info(f"No institutional trend alignments found within {v_limit}% of VAL today.")
 
 # ------------------------------------------
 # TAB 2: MULTI-YEAR BACKTESTER & PORTFOLIO SIMULATOR
@@ -358,7 +363,7 @@ with tab2:
     bt_threshold = col_d.slider("VAL Threshold (%)", 0.5, 5.0, 2.0, 0.5)
 
     if st.button("▶️ Run Backtest & Simulation", type="primary"):
-        with st.spinner(f"Simulating trades for {bt_symbol} across {bt_years} year(s)..."):
+        with st.spinner(f"Simulating institutional trades for {bt_symbol} across {bt_years} year(s)..."):
             bt_df, price_df = run_backtest(
                 bt_symbol, years=bt_years, val_threshold_pct=bt_threshold, initial_capital=initial_cap
             )
@@ -416,12 +421,12 @@ with tab2:
 # TAB 3: QUANT AI KNOWLEDGE BASE
 # ------------------------------------------
 with tab3:
-    st.subheader("🤖 Adaptive Strategy Core Rules")
-    with st.expander("📚 Multi-Regime Volume Profile Execution", expanded=True):
+    st.subheader("🤖 Institutional Strategy Core Rules")
+    with st.expander("📚 Institutional Trend-Following & Volume Profile", expanded=True):
         st.markdown("""
-        * **Volume Confluence:** Entries require volume expansion near VAL support to filter out weak setups.
-        * **ATR Stop Buffer:** Protects positions from minor wicks while maintaining controlled risk.
-        * **Dynamic 1:1+ R:R Target:** Automatically scales targets from Point of Control (POC) up to Value Area High (VAH) resistance depending on market structure.
+        * **Trend Alignment (50 & 200 EMA):** Ensures we only buy pullbacks when institutions are actively marking up the stock.
+        * **VAL Support Rebound:** Captures institutional limit orders positioned at Value Area Low boundaries.
+        * **Dynamic Profit Target:** Scales targets upward from POC to VAH resistance, maintaining a high risk-to-reward ratio.
         """)
 
 # ==========================================
@@ -436,8 +441,8 @@ with st.sidebar:
         q_upper = user_q.strip().upper()
         st.write(f"**Analyzing `{q_upper}`...**")
         st.info(
-            f"🤖 **Quant Insight for {q_upper}:**\n\n"
-            f"1. **Volume Profile Check:** Examine if institutional volume nodes sit near VAL support.\n"
-            f"2. **Risk-to-Reward:** Ensure the upside target to POC or VAH is at least 1:1 relative to the ATR stop.\n"
-            f"3. **Execution:** Enter on volume expansion candles."
+            f"🤖 **Institutional Quant Insight for {q_upper}:**\n\n"
+            f"1. **Trend Stack Check:** Confirm that Price > 50 EMA > 200 EMA.\n"
+            f"2. **Volume Profile Support:** Verify that price is pulling back toward VAL.\n"
+            f"3. **Execution:** Enter with an ATR stop below support targeting POC/VAH."
         )
