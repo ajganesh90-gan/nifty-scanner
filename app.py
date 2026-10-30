@@ -174,15 +174,22 @@ def run_live_scan(val_threshold_pct=2.0, ema_period=200):
 
 
 # ==========================================
-# BACKTESTING ENGINE WITH CAPITAL SIMULATION
+# CORRECTED BACKTESTING ENGINE
 # ==========================================
 @st.cache_data(ttl=3600)
 def run_backtest(ticker, years=3, val_threshold_pct=2.0, ema_period=200, initial_capital=100000):
     start_date = (datetime.now() - timedelta(days=years * 365)).strftime("%Y-%m-%d")
     df = yf.download(ticker, start=start_date, progress=False)
 
+    if df.empty:
+        return None, None
+
     if isinstance(df.columns, pd.MultiIndex):
-        df = df.xs(ticker, axis=1, level=1) if ticker in df.columns.levels[1] else df.droplevel(1, axis=1)
+        df = df.droplevel(1, axis=1)
+
+    required_cols = ["Open", "High", "Low", "Close", "Volume"]
+    if not all(col in df.columns for col in required_cols):
+        return None, None
 
     df = df.dropna()
     if len(df) < ema_period + 20:
@@ -192,62 +199,92 @@ def run_backtest(ticker, years=3, val_threshold_pct=2.0, ema_period=200, initial
     df["ATR"] = calculate_atr(df, window=14)
 
     trades = []
-    in_trade = False
-    entry_price, sl, target, entry_date = 0, 0, 0, None
     current_capital = initial_capital
+    i = ema_period + 20
 
-    for i in range(ema_period + 20, len(df)):
+    while i < len(df) - 1:
         sub_df = df.iloc[:i]
         curr_row = df.iloc[i]
         curr_date = df.index[i]
 
-        if not in_trade:
-            poc, val, _ = calculate_volume_profile(sub_df, lookback=20)
-            if poc and val:
-                close_p = float(curr_row["Close"])
-                ema_p = float(curr_row["EMA"])
-                dist = ((close_p - val) / val) * 100
+        poc, val, _ = calculate_volume_profile(sub_df, lookback=20)
+        if poc and val:
+            close_p = float(curr_row["Close"])
+            ema_p = float(curr_row["EMA"])
+            dist = ((close_p - val) / val) * 100
 
-                if 0 <= dist <= val_threshold_pct and close_p > ema_p and poc > close_p:
-                    in_trade = True
-                    entry_price = close_p
-                    sl = val * 0.992
-                    target = poc
-                    entry_date = curr_date
-        else:
-            high_p = float(curr_row["High"])
-            low_p = float(curr_row["Low"])
+            if 0 <= dist <= val_threshold_pct and close_p > ema_p and poc > close_p:
+                entry_price = close_p
+                sl = val * 0.992
+                target = poc
+                entry_date = curr_date
 
-            if low_p <= sl:
-                pnl_pct = ((sl - entry_price) / entry_price) * 100
-                trade_pnl_rs = current_capital * (pnl_pct / 100)
-                current_capital += trade_pnl_rs
-                trades.append({
-                    "Entry Date": entry_date.strftime("%Y-%m-%d"),
-                    "Exit Date": curr_date.strftime("%Y-%m-%d"),
-                    "Type": "SL Hit 🔴",
-                    "Entry (₹)": round(entry_price, 2),
-                    "Exit (₹)": round(sl, 2),
-                    "PnL (%)": round(pnl_pct, 2),
-                    "Profit/Loss (₹)": round(trade_pnl_rs, 2),
-                    "Portfolio (₹)": round(current_capital, 2)
-                })
-                in_trade = False
-            elif high_p >= target:
-                pnl_pct = ((target - entry_price) / entry_price) * 100
-                trade_pnl_rs = current_capital * (pnl_pct / 100)
-                current_capital += trade_pnl_rs
-                trades.append({
-                    "Entry Date": entry_date.strftime("%Y-%m-%d"),
-                    "Exit Date": curr_date.strftime("%Y-%m-%d"),
-                    "Type": "Target Hit 🟢",
-                    "Entry (₹)": round(entry_price, 2),
-                    "Exit (₹)": round(target, 2),
-                    "PnL (%)": round(pnl_pct, 2),
-                    "Profit/Loss (₹)": round(trade_pnl_rs, 2),
-                    "Portfolio (₹)": round(current_capital, 2)
-                })
-                in_trade = False
+                exit_found = False
+                for j in range(i + 1, len(df)):
+                    exit_row = df.iloc[j]
+                    exit_date = df.index[j]
+                    high_p = float(exit_row["High"])
+                    low_p = float(exit_row["Low"])
+
+                    hit_sl = low_p <= sl
+                    hit_target = high_p >= target
+
+                    if hit_sl and hit_target:
+                        # Conservative default: assume SL hit first if both touched on the same candle
+                        pnl_pct = ((sl - entry_price) / entry_price) * 100
+                        trade_pnl_rs = current_capital * (pnl_pct / 100)
+                        current_capital += trade_pnl_rs
+                        trades.append({
+                            "Entry Date": entry_date.strftime("%Y-%m-%d"),
+                            "Exit Date": exit_date.strftime("%Y-%m-%d"),
+                            "Type": "SL Hit 🔴",
+                            "Entry (₹)": round(entry_price, 2),
+                            "Exit (₹)": round(sl, 2),
+                            "PnL (%)": round(pnl_pct, 2),
+                            "Profit/Loss (₹)": round(trade_pnl_rs, 2),
+                            "Portfolio (₹)": round(current_capital, 2)
+                        })
+                        exit_found = True
+                        i = j
+                        break
+                    elif hit_sl:
+                        pnl_pct = ((sl - entry_price) / entry_price) * 100
+                        trade_pnl_rs = current_capital * (pnl_pct / 100)
+                        current_capital += trade_pnl_rs
+                        trades.append({
+                            "Entry Date": entry_date.strftime("%Y-%m-%d"),
+                            "Exit Date": exit_date.strftime("%Y-%m-%d"),
+                            "Type": "SL Hit 🔴",
+                            "Entry (₹)": round(entry_price, 2),
+                            "Exit (₹)": round(sl, 2),
+                            "PnL (%)": round(pnl_pct, 2),
+                            "Profit/Loss (₹)": round(trade_pnl_rs, 2),
+                            "Portfolio (₹)": round(current_capital, 2)
+                        })
+                        exit_found = True
+                        i = j
+                        break
+                    elif hit_target:
+                        pnl_pct = ((target - entry_price) / entry_price) * 100
+                        trade_pnl_rs = current_capital * (pnl_pct / 100)
+                        current_capital += trade_pnl_rs
+                        trades.append({
+                            "Entry Date": entry_date.strftime("%Y-%m-%d"),
+                            "Exit Date": exit_date.strftime("%Y-%m-%d"),
+                            "Type": "Target Hit 🟢",
+                            "Entry (₹)": round(entry_price, 2),
+                            "Exit (₹)": round(target, 2),
+                            "PnL (%)": round(pnl_pct, 2),
+                            "Profit/Loss (₹)": round(trade_pnl_rs, 2),
+                            "Portfolio (₹)": round(current_capital, 2)
+                        })
+                        exit_found = True
+                        i = j
+                        break
+
+                if not exit_found:
+                    break
+        i += 1
 
     trades_df = pd.DataFrame(trades)
     return trades_df, df
@@ -343,7 +380,6 @@ with tab2:
             losses = len(bt_df[bt_df["Type"] == "SL Hit 🔴"])
 
             win_rate = (wins / total_trades) * 100 if total_trades > 0 else 0
-            loss_rate = (losses / total_trades) * 100 if total_trades > 0 else 0
             
             final_portfolio = float(bt_df["Portfolio (₹)"].iloc[-1])
             net_profit_rs = final_portfolio - initial_cap
