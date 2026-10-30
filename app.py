@@ -105,10 +105,10 @@ def calculate_volume_profile(df, lookback=20):
 
 
 # ==========================================
-# INSTITUTIONAL SCANNER ENGINE
+# HIGH WIN-RATE SCANNER ENGINE
 # ==========================================
 @st.cache_data(ttl=1800)
-def run_live_scan(val_threshold_pct=2.0):
+def run_live_scan(val_threshold_pct=1.0):
     signals = []
     scan_date = datetime.now().strftime("%Y-%m-%d")
     data = yf.download(NIFTY_100_TICKERS, period="1y", interval="1d", group_by="ticker", progress=False)
@@ -129,29 +129,31 @@ def run_live_scan(val_threshold_pct=2.0):
 
             current_row = df.iloc[-1]
             close_price = float(current_row["Close"])
+            open_price = float(current_row["Open"])
             ema_50 = float(current_row["EMA_50"])
             ema_200 = float(current_row["EMA_200"])
             atr_val = float(current_row["ATR"])
 
             dist_to_val = ((close_price - val) / val) * 100
 
-            # Trend Alignment: Close > EMA 50 > EMA 200
-            is_institutional_trend = (close_price > ema_50) and (ema_50 > ema_200)
+            # High Win-Rate Filters: Trend Stack + Bullish Rejection Candle at VAL
+            is_uptrend = (close_price > ema_50) and (ema_50 > ema_200)
+            is_bullish_candle = close_price > open_price
 
-            if 0 <= dist_to_val <= val_threshold_pct and is_institutional_trend:
+            if 0 <= dist_to_val <= val_threshold_pct and is_uptrend and is_bullish_candle:
                 entry = close_price
-                sl = val - (1.5 * atr_val)  # Balanced buffer below VAL support
+                sl = val - (1.2 * atr_val)  # Safe buffer below VAL support
                 
-                target = vah if vah > entry else poc
-                if target <= entry:
-                    target = entry + (1.5 * (entry - sl))
+                # Optimized High-Probability Target (1.5x risk or POC, whichever is closer for fast execution)
+                ideal_target = entry + (1.5 * (entry - sl))
+                target = min(ideal_target, poc) if poc > entry else ideal_target
 
                 risk = entry - sl
                 reward = target - entry
                 rr_ratio = reward / risk if risk > 0 else 0
 
-                if rr_ratio >= 1.2:
-                    est_days = max(1, int(round(reward / atr_val))) if atr_val > 0 else 3
+                if rr_ratio >= 1.0:
+                    est_days = max(1, int(round(reward / atr_val))) if atr_val > 0 else 2
                     raw_symbol = ticker.replace(".NS", "")
 
                     signals.append({
@@ -173,10 +175,10 @@ def run_live_scan(val_threshold_pct=2.0):
 
 
 # ==========================================
-# INSTITUTIONAL BACKTESTING ENGINE
+# HIGH WIN-RATE BACKTESTING ENGINE
 # ==========================================
 @st.cache_data(ttl=3600)
-def run_backtest(ticker, years=3, val_threshold_pct=2.0, initial_capital=100000):
+def run_backtest(ticker, years=3, val_threshold_pct=1.0, initial_capital=100000):
     start_date = (datetime.now() - timedelta(days=years * 365)).strftime("%Y-%m-%d")
     df = yf.download(ticker, start=start_date, progress=False)
 
@@ -210,25 +212,26 @@ def run_backtest(ticker, years=3, val_threshold_pct=2.0, initial_capital=100000)
         poc, val, vah = calculate_volume_profile(sub_df, lookback=20)
         if poc and val and vah:
             close_p = float(curr_row["Close"])
+            open_p = float(curr_row["Open"])
             ema_50 = float(curr_row["EMA_50"])
             ema_200 = float(curr_row["EMA_200"])
             atr_p = float(curr_row["ATR"])
             dist = ((close_p - val) / val) * 100
 
-            is_institutional_trend = (close_p > ema_50) and (ema_50 > ema_200)
+            is_uptrend = (close_p > ema_50) and (ema_50 > ema_200)
+            is_bullish_candle = close_p > open_p
 
-            if 0 <= dist <= val_threshold_pct and is_institutional_trend:
+            if 0 <= dist <= val_threshold_pct and is_uptrend and is_bullish_candle:
                 entry_price = close_p
-                sl = val - (1.5 * atr_p)
-                target = vah if vah > entry_price else poc
-                if target <= entry_price:
-                    target = entry_price + (1.5 * (entry_price - sl))
+                sl = val - (1.2 * atr_p)
+                ideal_target = entry_price + (1.5 * (entry_price - sl))
+                target = min(ideal_target, poc) if poc > entry_price else ideal_target
 
                 risk = entry_price - sl
                 reward = target - entry_price
                 rr_ratio = reward / risk if risk > 0 else 0
 
-                if rr_ratio >= 1.2:
+                if rr_ratio >= 1.0:
                     entry_date = curr_date
                     exit_found = False
 
@@ -288,7 +291,7 @@ def run_backtest(ticker, years=3, val_threshold_pct=2.0, initial_capital=100000)
 # HEADER & MARKET INDICES
 # ==========================================
 st.title("⚡ Nifty 100 Volume Profile Quant Terminal")
-st.caption("Institutional Trend-Aligned Mean-Reversion Suite")
+st.caption("High Win-Rate Institutional Mean-Reversion Suite")
 
 try:
     indices = yf.download(["^NSEI", "^NSEBANK"], period="5d", interval="1d", progress=False)
@@ -319,13 +322,13 @@ tab1, tab2, tab3 = st.tabs(["🚀 Live Scanner", "📊 Strategy Backtester", "�
 # ------------------------------------------
 with tab1:
     st.subheader("Live Market Opportunity Scanner")
-    v_limit = st.slider("VAL Distance Threshold (%)", 0.5, 5.0, 1.5, 0.5)
+    v_limit = st.slider("VAL Distance Threshold (%)", 0.5, 3.0, 1.0, 0.5)
 
-    with st.spinner("Scanning Nifty 100 universe with institutional trend filters..."):
+    with st.spinner("Scanning Nifty 100 universe for high win-rate setups..."):
         scan_results = run_live_scan(val_threshold_pct=v_limit)
 
     if not scan_results.empty:
-        st.success(f"Found {len(scan_results)} high-probability institutional setups within {v_limit}% of VAL!")
+        st.success(f"Found {len(scan_results)} high win-rate setups within {v_limit}% of VAL!")
 
         st.dataframe(
             scan_results,
@@ -343,11 +346,11 @@ with tab1:
         st.download_button(
             "📥 Export Setups to Excel",
             data=excel_buffer.getvalue(),
-            file_name=f"Institutional_VP_Scan_{datetime.now().strftime('%Y%m%d')}.xlsx",
+            file_name=f"High_WinRate_VP_Scan_{datetime.now().strftime('%Y%m%d')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
     else:
-        st.info(f"No institutional trend alignments found within {v_limit}% of VAL today.")
+        st.info(f"No setups matching high win-rate criteria within {v_limit}% of VAL today.")
 
 # ------------------------------------------
 # TAB 2: MULTI-YEAR BACKTESTER & PORTFOLIO SIMULATOR
@@ -360,10 +363,10 @@ with tab2:
     bt_symbol = col_a.selectbox("Stock Ticker", NIFTY_100_TICKERS, index=47)
     initial_cap = col_b.number_input("Investment Amount (₹)", value=100000, step=10000, format="%d")
     bt_years = col_c.slider("Period (Years)", 1, 10, 3)
-    bt_threshold = col_d.slider("VAL Threshold (%)", 0.5, 5.0, 2.0, 0.5)
+    bt_threshold = col_d.slider("VAL Threshold (%)", 0.5, 3.0, 1.0, 0.5)
 
     if st.button("▶️ Run Backtest & Simulation", type="primary"):
-        with st.spinner(f"Simulating institutional trades for {bt_symbol} across {bt_years} year(s)..."):
+        with st.spinner(f"Simulating high win-rate trades for {bt_symbol} across {bt_years} year(s)..."):
             bt_df, price_df = run_backtest(
                 bt_symbol, years=bt_years, val_threshold_pct=bt_threshold, initial_capital=initial_cap
             )
@@ -421,12 +424,12 @@ with tab2:
 # TAB 3: QUANT AI KNOWLEDGE BASE
 # ------------------------------------------
 with tab3:
-    st.subheader("🤖 Institutional Strategy Core Rules")
-    with st.expander("📚 Institutional Trend-Following & Volume Profile", expanded=True):
+    st.subheader("🤖 High Win-Rate Core Rules")
+    with st.expander("📚 Optimizing for 60%+ Win Rate", expanded=True):
         st.markdown("""
-        * **Trend Alignment (50 & 200 EMA):** Ensures we only buy pullbacks when institutions are actively marking up the stock.
-        * **VAL Support Rebound:** Captures institutional limit orders positioned at Value Area Low boundaries.
-        * **Dynamic Profit Target:** Scales targets upward from POC to VAH resistance, maintaining a high risk-to-reward ratio.
+        * **Bullish Rejection Candle:** Entries occur only after a confirmed green day at VAL support.
+        * **Balanced Targets:** Targets are capped at optimal risk multiples to ensure rapid execution and high hit rates.
+        * **Trend Confluence:** Strict EMA stack filtering ensures trades align with the dominant institutional trend.
         """)
 
 # ==========================================
@@ -441,8 +444,8 @@ with st.sidebar:
         q_upper = user_q.strip().upper()
         st.write(f"**Analyzing `{q_upper}`...**")
         st.info(
-            f"🤖 **Institutional Quant Insight for {q_upper}:**\n\n"
-            f"1. **Trend Stack Check:** Confirm that Price > 50 EMA > 200 EMA.\n"
-            f"2. **Volume Profile Support:** Verify that price is pulling back toward VAL.\n"
-            f"3. **Execution:** Enter with an ATR stop below support targeting POC/VAH."
+            f"🤖 **Quant Insight for {q_upper}:**\n\n"
+            f"1. **Rejection Check:** Look for a bullish close directly off VAL support.\n"
+            f"2. **Target Realism:** Aim for achievable profit targets to maximize win frequency.\n"
+            f"3. **Execution:** Maintain strict discipline on stop-loss buffers."
         )
