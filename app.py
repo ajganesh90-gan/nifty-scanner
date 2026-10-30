@@ -88,7 +88,7 @@ NIFTY_250_EXT = [
     "BALKRISIND.NS", "BANDHANBNK.NS", "BATAINDIA.NS", "BHARATFORG.NS", "BSOFT.NS", "CGPOWER.NS",
     "COFORGE.NS", "CONCOR.NS", "CUMMINSIND.NS", "DEEPAKNTR.NS", "ESCORTS.NS", "FEDERALBNK.NS",
     "FORTIS.NS", "GLENMARK.NS", "GMRINFRA.NS", "GUJGASLTD.NS", "IDFCFIRSTB.NS", "IPCALAB.NS",
-    "JOBR.NS", "KPITTECH.NS", "LICHSGFIN.NS", "MRF.NS", "M&MFIN.NS", "POLYCAB.NS", "RECLTD.NS",
+    "KPITTECH.NS", "LICHSGFIN.NS", "MRF.NS", "M&MFIN.NS", "POLYCAB.NS", "RECLTD.NS",
     "SUPREMEIND.NS", "VOLTAS.NS", "YESBANK.NS"
 ]
 
@@ -219,7 +219,7 @@ def run_live_scan(ticker_list, val_threshold_pct=1.0, atr_multiplier=1.2, min_rr
 
 
 # ==========================================
-# BACKTESTING ENGINE WITH SINGLE & ALL-STOCKS OPTION
+# BACKTESTING ENGINE WITH YEARLY BREAKDOWN
 # ==========================================
 @st.cache_data(ttl=3600)
 def run_backtest_single(ticker, years=3, val_threshold_pct=1.0, atr_multiplier=1.2, min_rr=1.0, initial_capital=100000):
@@ -297,6 +297,7 @@ def run_backtest_single(ticker, years=3, val_threshold_pct=1.0, atr_multiplier=1
                                 "Stock": ticker.replace(".NS", ""),
                                 "Entry Date": entry_date.strftime("%Y-%m-%d"),
                                 "Exit Date": exit_date.strftime("%Y-%m-%d"),
+                                "Year": str(exit_date.year),
                                 "Type": "Target Hit 🟢",
                                 "Entry (₹)": round(entry_price, 2),
                                 "Exit (₹)": round(target, 2),
@@ -315,6 +316,7 @@ def run_backtest_single(ticker, years=3, val_threshold_pct=1.0, atr_multiplier=1
                                 "Stock": ticker.replace(".NS", ""),
                                 "Entry Date": entry_date.strftime("%Y-%m-%d"),
                                 "Exit Date": exit_date.strftime("%Y-%m-%d"),
+                                "Year": str(exit_date.year),
                                 "Type": "SL Hit 🔴",
                                 "Entry (₹)": round(entry_price, 2),
                                 "Exit (₹)": round(sl, 2),
@@ -384,7 +386,6 @@ def fetch_breaking_news():
                 desc = item.find("description").text if item.find("description") is not None else ""
                 clean_desc = re.sub("<.*?>", "", desc or "")
                 
-                # Sentiment & Stock Impact Analysis Logic
                 sentiment = "NEUTRAL"
                 badge_class = "badge-neutral"
                 if any(w in (title + clean_desc).lower() for w in ["profit", "surges", "jumps", "rally", "record", "growth", "high"]):
@@ -394,7 +395,6 @@ def fetch_breaking_news():
                     sentiment = "BEARISH"
                     badge_class = "badge-bear"
 
-                # Identify impacted sectors/stocks
                 impacted = []
                 if "bank" in (title + clean_desc).lower(): impacted.append("Bank Nifty (HDFCBANK, ICICIBANK, SBIN)")
                 if "it" in (title + clean_desc).lower() or "tech" in (title + clean_desc).lower(): impacted.append("IT Sector (TCS, INFY, HCLTECH)")
@@ -536,6 +536,21 @@ with tab2:
                 m3.metric("Net Profit/Loss", f"₹{net_profit_rs:,.2f}")
                 m4.metric("Win Rate (%)", f"{win_rate:.1f}% ({wins}W / {losses}L)")
 
+                # --- NEW: Yearly Breakdown Metric Display ---
+                st.markdown("### 📅 Yearly Performance Breakdown")
+                yearly_group = bt_df.groupby("Year")
+                y_cols = st.columns(len(yearly_group) if len(yearly_group) > 0 else 1)
+                
+                for idx, (year_val, group) in enumerate(yearly_group):
+                    y_wins = len(group[group["Type"] == "Target Hit 🟢"])
+                    y_losses = len(group[group["Type"] == "SL Hit 🔴"])
+                    y_total = len(group)
+                    y_rate = (y_wins / y_total) * 100 if y_total > 0 else 0
+                    y_pnl = group["PnL (%)"].sum()
+                    
+                    with y_cols[idx % len(y_cols)]:
+                        st.metric(f"Year {year_val}", f"{y_rate:.1f}% Win Rate", f"{y_wins}W / {y_losses}L ({y_pnl:+.1f}%)")
+
                 fig = go.Figure()
                 fig.add_trace(go.Scatter(x=bt_df["Exit Date"], y=bt_df["Portfolio (₹)"], mode="lines+markers", line=dict(color="#00E5FF", width=3)))
                 fig.update_layout(title=f"{bt_symbol} Portfolio Growth", template="plotly_dark")
@@ -557,6 +572,20 @@ with tab2:
 
             if not summary_df.empty:
                 st.success(f"Universe Scan Complete! Found signals in {len(summary_df)} stocks.")
+                
+                # --- NEW: Universe-Wide Yearly Breakdown ---
+                st.markdown("### 📅 Universe-Wide Yearly Breakdown")
+                if "Year" in combined_df.columns:
+                    univ_yearly = combined_df.groupby("Year")
+                    u_cols = st.columns(len(univ_yearly) if len(univ_yearly) > 0 else 1)
+                    for idx, (u_year, u_group) in enumerate(univ_yearly):
+                        u_wins = len(u_group[u_group["Type"] == "Target Hit 🟢"])
+                        u_losses = len(u_group[u_group["Type"] == "SL Hit 🔴"])
+                        u_total = len(u_group)
+                        u_rate = (u_wins / u_total) * 100 if u_total > 0 else 0
+                        with u_cols[idx % len(u_cols)]:
+                            st.metric(f"Year {u_year}", f"{u_rate:.1f}% Win Rate", f"{u_wins}W / {u_losses}L ({u_total} Trades)")
+
                 st.subheader("📌 Stocks Generating Signals Summary")
                 st.dataframe(summary_df, use_container_width=True, hide_index=True)
 
@@ -608,6 +637,6 @@ with st.sidebar:
         st.write(f"**Analyzing `{q_upper}`...**")
         st.info(
             f"🤖 **Quant Insight for {q_upper}:**\n\n"
-            f"1. **Universe Filtering:** Use Nifty 50/100 for high liquidity or Nifty 250/500 for high-beta momentum.\n"
-            f"2. **Impact Tracking:** Check the News tab to ensure macro news aligns with your technical setups."
+            f"1. **Yearly Win/Loss Tracking:** View individual performance metrics per calendar year directly in the backtest tab.\n"
+            f"2. **Universe Coverage:** Track signals across Nifty 50, 100, 250, and 500 indexes simultaneously."
         )
