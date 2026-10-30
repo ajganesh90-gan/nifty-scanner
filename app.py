@@ -105,10 +105,10 @@ def calculate_volume_profile(df, lookback=20):
 
 
 # ==========================================
-# HIGH WIN-RATE SCANNER ENGINE
+# ADVANCED MULTI-STOCK SCANNER ENGINE
 # ==========================================
 @st.cache_data(ttl=1800)
-def run_live_scan(val_threshold_pct=1.0):
+def run_live_scan(val_threshold_pct=1.0, atr_multiplier=1.2, min_rr=1.0):
     signals = []
     scan_date = datetime.now().strftime("%Y-%m-%d")
     data = yf.download(NIFTY_100_TICKERS, period="1y", interval="1d", group_by="ticker", progress=False)
@@ -136,15 +136,13 @@ def run_live_scan(val_threshold_pct=1.0):
 
             dist_to_val = ((close_price - val) / val) * 100
 
-            # High Win-Rate Filters: Trend Stack + Bullish Rejection Candle at VAL
             is_uptrend = (close_price > ema_50) and (ema_50 > ema_200)
             is_bullish_candle = close_price > open_price
 
             if 0 <= dist_to_val <= val_threshold_pct and is_uptrend and is_bullish_candle:
                 entry = close_price
-                sl = val - (1.2 * atr_val)  # Safe buffer below VAL support
+                sl = val - (atr_multiplier * atr_val)
                 
-                # Optimized High-Probability Target (1.5x risk or POC, whichever is closer for fast execution)
                 ideal_target = entry + (1.5 * (entry - sl))
                 target = min(ideal_target, poc) if poc > entry else ideal_target
 
@@ -152,7 +150,7 @@ def run_live_scan(val_threshold_pct=1.0):
                 reward = target - entry
                 rr_ratio = reward / risk if risk > 0 else 0
 
-                if rr_ratio >= 1.0:
+                if rr_ratio >= min_rr:
                     est_days = max(1, int(round(reward / atr_val))) if atr_val > 0 else 2
                     raw_symbol = ticker.replace(".NS", "")
 
@@ -175,10 +173,10 @@ def run_live_scan(val_threshold_pct=1.0):
 
 
 # ==========================================
-# HIGH WIN-RATE BACKTESTING ENGINE
+# BACKTESTING ENGINE WITH PARAMETERS
 # ==========================================
 @st.cache_data(ttl=3600)
-def run_backtest(ticker, years=3, val_threshold_pct=1.0, initial_capital=100000):
+def run_backtest(ticker, years=3, val_threshold_pct=1.0, atr_multiplier=1.2, min_rr=1.0, initial_capital=100000):
     start_date = (datetime.now() - timedelta(days=years * 365)).strftime("%Y-%m-%d")
     df = yf.download(ticker, start=start_date, progress=False)
 
@@ -223,7 +221,7 @@ def run_backtest(ticker, years=3, val_threshold_pct=1.0, initial_capital=100000)
 
             if 0 <= dist <= val_threshold_pct and is_uptrend and is_bullish_candle:
                 entry_price = close_p
-                sl = val - (1.2 * atr_p)
+                sl = val - (atr_multiplier * atr_p)
                 ideal_target = entry_price + (1.5 * (entry_price - sl))
                 target = min(ideal_target, poc) if poc > entry_price else ideal_target
 
@@ -231,7 +229,7 @@ def run_backtest(ticker, years=3, val_threshold_pct=1.0, initial_capital=100000)
                 reward = target - entry_price
                 rr_ratio = reward / risk if risk > 0 else 0
 
-                if rr_ratio >= 1.0:
+                if rr_ratio >= min_rr:
                     entry_date = curr_date
                     exit_found = False
 
@@ -291,7 +289,7 @@ def run_backtest(ticker, years=3, val_threshold_pct=1.0, initial_capital=100000)
 # HEADER & MARKET INDICES
 # ==========================================
 st.title("⚡ Nifty 100 Volume Profile Quant Terminal")
-st.caption("High Win-Rate Institutional Mean-Reversion Suite")
+st.caption("Multi-Stock Institutional Mean-Reversion Suite")
 
 try:
     indices = yf.download(["^NSEI", "^NSEBANK"], period="5d", interval="1d", progress=False)
@@ -315,20 +313,25 @@ st.divider()
 # ==========================================
 # TABS INTERFACE
 # ==========================================
-tab1, tab2, tab3 = st.tabs(["🚀 Live Scanner", "📊 Strategy Backtester", "🤖 Quant AI Intelligence"])
+tab1, tab2, tab3 = st.tabs(["🚀 Live Multi-Stock Scanner", "📊 Strategy Backtester", "🤖 Quant AI Intelligence"])
 
 # ------------------------------------------
-# TAB 1: LIVE SCANNER
+# TAB 1: LIVE MULTI-STOCK SCANNER
 # ------------------------------------------
 with tab1:
-    st.subheader("Live Market Opportunity Scanner")
-    v_limit = st.slider("VAL Distance Threshold (%)", 0.5, 3.0, 1.0, 0.5)
+    st.subheader("Nifty 100 Multi-Stock Parameter Engine")
+    
+    # Interactive Multi-Stock Parameters
+    col_p1, col_p2, col_p3 = st.columns(3)
+    v_limit = col_p1.slider("VAL Distance Threshold (%)", 0.5, 3.0, 1.0, 0.5)
+    atr_mult = col_p2.slider("ATR Stop Buffer Multiplier", 0.8, 2.5, 1.2, 0.1)
+    min_rr_param = col_p3.slider("Minimum R:R Ratio", 0.8, 2.0, 1.0, 0.1)
 
-    with st.spinner("Scanning Nifty 100 universe for high win-rate setups..."):
-        scan_results = run_live_scan(val_threshold_pct=v_limit)
+    with st.spinner("Scanning Nifty 100 universe across all stocks simultaneously..."):
+        scan_results = run_live_scan(val_threshold_pct=v_limit, atr_multiplier=atr_mult, min_rr=min_rr_param)
 
     if not scan_results.empty:
-        st.success(f"Found {len(scan_results)} high win-rate setups within {v_limit}% of VAL!")
+        st.success(f"Found {len(scan_results)} high-probability setups across the Nifty 100 universe!")
 
         st.dataframe(
             scan_results,
@@ -341,16 +344,16 @@ with tab1:
 
         excel_buffer = io.BytesIO()
         with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
-            scan_results.to_excel(writer, index=False, sheet_name="Setups")
+            scan_results.to_excel(writer, index=False, sheet_name="MultiStock_Setups")
 
         st.download_button(
-            "📥 Export Setups to Excel",
+            "📥 Export Multi-Stock Report to Excel",
             data=excel_buffer.getvalue(),
-            file_name=f"High_WinRate_VP_Scan_{datetime.now().strftime('%Y%m%d')}.xlsx",
+            file_name=f"Nifty100_MultiStock_Scan_{datetime.now().strftime('%Y%m%d')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
     else:
-        st.info(f"No setups matching high win-rate criteria within {v_limit}% of VAL today.")
+        st.info(f"No setups matching current parameters. Try adjusting the VAL threshold or ATR multiplier.")
 
 # ------------------------------------------
 # TAB 2: MULTI-YEAR BACKTESTER & PORTFOLIO SIMULATOR
@@ -359,16 +362,17 @@ with tab2:
     st.subheader("Strategy Backtesting & Portfolio Simulator")
     st.caption("Simulate capital growth, win/loss ratios, and historical performance across 1 to 10 years.")
 
-    col_a, col_b, col_c, col_d = st.columns(4)
+    col_a, col_b, col_c, col_d, col_e = st.columns(5)
     bt_symbol = col_a.selectbox("Stock Ticker", NIFTY_100_TICKERS, index=47)
-    initial_cap = col_b.number_input("Investment Amount (₹)", value=100000, step=10000, format="%d")
-    bt_years = col_c.slider("Period (Years)", 1, 10, 3)
-    bt_threshold = col_d.slider("VAL Threshold (%)", 0.5, 3.0, 1.0, 0.5)
+    initial_cap = col_b.number_input("Capital (₹)", value=100000, step=10000, format="%d")
+    bt_years = col_c.slider("Period", 1, 10, 3)
+    bt_threshold = col_d.slider("VAL %", 0.5, 3.0, 1.0, 0.5)
+    bt_atr = col_e.slider("ATR Mult", 0.8, 2.0, 1.2, 0.1)
 
     if st.button("▶️ Run Backtest & Simulation", type="primary"):
-        with st.spinner(f"Simulating high win-rate trades for {bt_symbol} across {bt_years} year(s)..."):
+        with st.spinner(f"Simulating trades for {bt_symbol} across {bt_years} year(s)..."):
             bt_df, price_df = run_backtest(
-                bt_symbol, years=bt_years, val_threshold_pct=bt_threshold, initial_capital=initial_cap
+                bt_symbol, years=bt_years, val_threshold_pct=bt_threshold, atr_multiplier=bt_atr, initial_capital=initial_cap
             )
 
         if bt_df is not None and not bt_df.empty:
@@ -418,18 +422,18 @@ with tab2:
             st.subheader("Detailed Trade Execution Log")
             st.dataframe(bt_df, use_container_width=True, hide_index=True)
         else:
-            st.warning(f"No trades triggered for {bt_symbol} in the selected timeframe. Try modifying the parameters or ticker.")
+            st.warning(f"No trades triggered for {bt_symbol} in the selected timeframe. Try modifying the parameters.")
 
 # ------------------------------------------
 # TAB 3: QUANT AI KNOWLEDGE BASE
 # ------------------------------------------
 with tab3:
-    st.subheader("🤖 High Win-Rate Core Rules")
-    with st.expander("📚 Optimizing for 60%+ Win Rate", expanded=True):
+    st.subheader("🤖 Multi-Stock Strategy Core Rules")
+    with st.expander("📚 Scaling Across Nifty 100 Universe", expanded=True):
         st.markdown("""
-        * **Bullish Rejection Candle:** Entries occur only after a confirmed green day at VAL support.
-        * **Balanced Targets:** Targets are capped at optimal risk multiples to ensure rapid execution and high hit rates.
-        * **Trend Confluence:** Strict EMA stack filtering ensures trades align with the dominant institutional trend.
+        * **Universe Scanning:** Instead of locking capital into a single stock, scan all 100 tickers simultaneously to ensure continuous deal flow.
+        * **Adjustable Parameters:** Fine-tune ATR multipliers and VAL thresholds to balance signal frequency with win-rate precision.
+        * **Trend Confluence:** Maintains institutional trend alignment (50/200 EMA) across all scanned candidates.
         """)
 
 # ==========================================
@@ -445,7 +449,7 @@ with st.sidebar:
         st.write(f"**Analyzing `{q_upper}`...**")
         st.info(
             f"🤖 **Quant Insight for {q_upper}:**\n\n"
-            f"1. **Rejection Check:** Look for a bullish close directly off VAL support.\n"
-            f"2. **Target Realism:** Aim for achievable profit targets to maximize win frequency.\n"
-            f"3. **Execution:** Maintain strict discipline on stop-loss buffers."
+            f"1. **Multi-Stock Diversification:** Spread capital across multiple Nifty 100 setups to maximize compounding.\n"
+            f"2. **Parameter Tuning:** Use the multi-stock scanner controls to dial in optimal risk-to-reward ratios.\n"
+            f"3. **Execution:** Always verify trend alignment before entry."
         )
