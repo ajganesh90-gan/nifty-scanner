@@ -105,10 +105,10 @@ def calculate_volume_profile(df, lookback=20):
 
 
 # ==========================================
-# ADVANCED MULTI-STOCK SCANNER ENGINE
+# RELAXED HIGH-WIN RATE SCANNER ENGINE
 # ==========================================
 @st.cache_data(ttl=1800)
-def run_live_scan(val_threshold_pct=1.0, atr_multiplier=1.2, min_rr=1.0):
+def run_live_scan(val_threshold_pct=2.5, atr_multiplier=1.2, min_rr=1.0):
     signals = []
     scan_date = datetime.now().strftime("%Y-%m-%d")
     data = yf.download(NIFTY_100_TICKERS, period="1y", interval="1d", group_by="ticker", progress=False)
@@ -122,6 +122,7 @@ def run_live_scan(val_threshold_pct=1.0, atr_multiplier=1.2, min_rr=1.0):
             df["EMA_50"] = df["Close"].ewm(span=50, adjust=False).mean()
             df["EMA_200"] = df["Close"].ewm(span=200, adjust=False).mean()
             df["ATR"] = calculate_atr(df, window=14)
+            df["Vol_SMA"] = df["Volume"].rolling(20).mean()
 
             poc, val, vah = calculate_volume_profile(df, lookback=20)
             if not poc or not val or not vah:
@@ -129,17 +130,19 @@ def run_live_scan(val_threshold_pct=1.0, atr_multiplier=1.2, min_rr=1.0):
 
             current_row = df.iloc[-1]
             close_price = float(current_row["Close"])
-            open_price = float(current_row["Open"])
             ema_50 = float(current_row["EMA_50"])
             ema_200 = float(current_row["EMA_200"])
             atr_val = float(current_row["ATR"])
+            vol_val = float(current_row["Volume"])
+            vol_avg = float(current_row["Vol_SMA"])
 
             dist_to_val = ((close_price - val) / val) * 100
 
-            is_uptrend = (close_price > ema_50) and (ema_50 > ema_200)
-            is_bullish_candle = close_price > open_price
+            # Trend Alignment: Close > EMA 200 (Institutional Bullish Bias)
+            is_uptrend = close_price > ema_200
+            has_volume_support = vol_val >= (vol_avg * 0.8)
 
-            if 0 <= dist_to_val <= val_threshold_pct and is_uptrend and is_bullish_candle:
+            if 0 <= dist_to_val <= val_threshold_pct and is_uptrend and has_volume_support:
                 entry = close_price
                 sl = val - (atr_multiplier * atr_val)
                 
@@ -173,10 +176,10 @@ def run_live_scan(val_threshold_pct=1.0, atr_multiplier=1.2, min_rr=1.0):
 
 
 # ==========================================
-# BACKTESTING ENGINE WITH PARAMETERS
+# BACKTESTING ENGINE WITH FLEXIBLE THRESHOLDS
 # ==========================================
 @st.cache_data(ttl=3600)
-def run_backtest(ticker, years=3, val_threshold_pct=1.0, atr_multiplier=1.2, min_rr=1.0, initial_capital=100000):
+def run_backtest(ticker, years=3, val_threshold_pct=2.5, atr_multiplier=1.2, min_rr=1.0, initial_capital=100000):
     start_date = (datetime.now() - timedelta(days=years * 365)).strftime("%Y-%m-%d")
     df = yf.download(ticker, start=start_date, progress=False)
 
@@ -197,6 +200,7 @@ def run_backtest(ticker, years=3, val_threshold_pct=1.0, atr_multiplier=1.2, min
     df["EMA_50"] = df["Close"].ewm(span=50, adjust=False).mean()
     df["EMA_200"] = df["Close"].ewm(span=200, adjust=False).mean()
     df["ATR"] = calculate_atr(df, window=14)
+    df["Vol_SMA"] = df["Volume"].rolling(20).mean()
 
     trades = []
     current_capital = initial_capital
@@ -210,16 +214,16 @@ def run_backtest(ticker, years=3, val_threshold_pct=1.0, atr_multiplier=1.2, min
         poc, val, vah = calculate_volume_profile(sub_df, lookback=20)
         if poc and val and vah:
             close_p = float(curr_row["Close"])
-            open_p = float(curr_row["Open"])
-            ema_50 = float(curr_row["EMA_50"])
             ema_200 = float(curr_row["EMA_200"])
             atr_p = float(curr_row["ATR"])
+            vol_p = float(curr_row["Volume"])
+            vol_avg = float(curr_row["Vol_SMA"])
             dist = ((close_p - val) / val) * 100
 
-            is_uptrend = (close_p > ema_50) and (ema_50 > ema_200)
-            is_bullish_candle = close_p > open_p
+            is_uptrend = close_p > ema_200
+            has_volume_support = vol_p >= (vol_avg * 0.8)
 
-            if 0 <= dist <= val_threshold_pct and is_uptrend and is_bullish_candle:
+            if 0 <= dist <= val_threshold_pct and is_uptrend and has_volume_support:
                 entry_price = close_p
                 sl = val - (atr_multiplier * atr_p)
                 ideal_target = entry_price + (1.5 * (entry_price - sl))
@@ -321,17 +325,16 @@ tab1, tab2, tab3 = st.tabs(["🚀 Live Multi-Stock Scanner", "📊 Strategy Back
 with tab1:
     st.subheader("Nifty 100 Multi-Stock Parameter Engine")
     
-    # Interactive Multi-Stock Parameters
     col_p1, col_p2, col_p3 = st.columns(3)
-    v_limit = col_p1.slider("VAL Distance Threshold (%)", 0.5, 3.0, 1.0, 0.5)
+    v_limit = col_p1.slider("VAL Distance Threshold (%)", 0.5, 5.0, 2.5, 0.5)
     atr_mult = col_p2.slider("ATR Stop Buffer Multiplier", 0.8, 2.5, 1.2, 0.1)
     min_rr_param = col_p3.slider("Minimum R:R Ratio", 0.8, 2.0, 1.0, 0.1)
 
-    with st.spinner("Scanning Nifty 100 universe across all stocks simultaneously..."):
+    with st.spinner("Scanning Nifty 100 universe across all stocks..."):
         scan_results = run_live_scan(val_threshold_pct=v_limit, atr_multiplier=atr_mult, min_rr=min_rr_param)
 
     if not scan_results.empty:
-        st.success(f"Found {len(scan_results)} high-probability setups across the Nifty 100 universe!")
+        st.success(f"Found {len(scan_results)} setups across the Nifty 100 universe!")
 
         st.dataframe(
             scan_results,
@@ -353,7 +356,7 @@ with tab1:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
     else:
-        st.info(f"No setups matching current parameters. Try adjusting the VAL threshold or ATR multiplier.")
+        st.info(f"No setups matching current parameters. Try adjusting the sliders above.")
 
 # ------------------------------------------
 # TAB 2: MULTI-YEAR BACKTESTER & PORTFOLIO SIMULATOR
@@ -366,7 +369,7 @@ with tab2:
     bt_symbol = col_a.selectbox("Stock Ticker", NIFTY_100_TICKERS, index=47)
     initial_cap = col_b.number_input("Capital (₹)", value=100000, step=10000, format="%d")
     bt_years = col_c.slider("Period", 1, 10, 3)
-    bt_threshold = col_d.slider("VAL %", 0.5, 3.0, 1.0, 0.5)
+    bt_threshold = col_d.slider("VAL %", 0.5, 5.0, 2.5, 0.5)
     bt_atr = col_e.slider("ATR Mult", 0.8, 2.0, 1.2, 0.1)
 
     if st.button("▶️ Run Backtest & Simulation", type="primary"):
@@ -398,7 +401,6 @@ with tab2:
 
             st.caption(f"📅 **Backtest Period:** `{start_date_str}` to `{end_date_str}` ({bt_years} Years Active Simulation)")
 
-            # Equity Curve Plotly Chart
             fig = go.Figure()
             fig.add_trace(go.Scatter(
                 x=bt_df["Exit Date"],
@@ -422,18 +424,18 @@ with tab2:
             st.subheader("Detailed Trade Execution Log")
             st.dataframe(bt_df, use_container_width=True, hide_index=True)
         else:
-            st.warning(f"No trades triggered for {bt_symbol} in the selected timeframe. Try modifying the parameters.")
+            st.warning(f"No trades triggered for {bt_symbol} in the selected timeframe. Try increasing the VAL % slider to 3.0% or 4.0%.")
 
 # ------------------------------------------
 # TAB 3: QUANT AI KNOWLEDGE BASE
 # ------------------------------------------
 with tab3:
     st.subheader("🤖 Multi-Stock Strategy Core Rules")
-    with st.expander("📚 Scaling Across Nifty 100 Universe", expanded=True):
+    with st.expander("📚 Signal Tuning Guidelines", expanded=True):
         st.markdown("""
-        * **Universe Scanning:** Instead of locking capital into a single stock, scan all 100 tickers simultaneously to ensure continuous deal flow.
-        * **Adjustable Parameters:** Fine-tune ATR multipliers and VAL thresholds to balance signal frequency with win-rate precision.
-        * **Trend Confluence:** Maintains institutional trend alignment (50/200 EMA) across all scanned candidates.
+        * **VAL Distance Threshold:** Keep between `2.0%` and `3.0%` for consistent deal flow.
+        * **ATR Stop Multiplier:** `1.2x` provides optimal breathing room against intraday wicks.
+        * **Trend Confirmation:** Filters for trades trading above the 200 EMA to align with macro momentum.
         """)
 
 # ==========================================
@@ -449,7 +451,7 @@ with st.sidebar:
         st.write(f"**Analyzing `{q_upper}`...**")
         st.info(
             f"🤖 **Quant Insight for {q_upper}:**\n\n"
-            f"1. **Multi-Stock Diversification:** Spread capital across multiple Nifty 100 setups to maximize compounding.\n"
-            f"2. **Parameter Tuning:** Use the multi-stock scanner controls to dial in optimal risk-to-reward ratios.\n"
-            f"3. **Execution:** Always verify trend alignment before entry."
+            f"1. **Signal Balance:** Expand VAL % to 2.5% to capture quality pullbacks before they launch.\n"
+            f"2. **Risk Control:** Use 1.2x ATR buffer to avoid premature stop-outs.\n"
+            f"3. **Execution:** Ensure price is resting above the 200 EMA."
         )
