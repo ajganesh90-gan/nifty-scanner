@@ -285,7 +285,6 @@ def run_v3_scanner(ticker_tuple, forced_regime="AUTO", val_threshold_pct=1.5, at
             atr_val = float(current_row["ATR"])
             vol_val = float(current_row["Volume"])
             vol_avg = float(current_row["Vol_SMA"])
-            adx_val = float(current_row["ADX"]) if not np.isnan(current_row["ADX"]) else 15.0
 
             dist_val = ((close_price - val) / val) * 100
             dist_vah = ((vah - close_price) / vah) * 100
@@ -295,22 +294,23 @@ def run_v3_scanner(ticker_tuple, forced_regime="AUTO", val_threshold_pct=1.5, at
             sl = 0.0
             target = 0.0
 
-            # --- ENGINE A: BULL MARKET ---
-            if market_regime == "Bull" and (e20 > e50 > e200):
-                if 0 <= dist_val <= val_threshold_pct and vol_val >= (vol_avg * 0.8):
+            # --- STRICT ISOLATED ENGINES ---
+            if market_regime == "Bull":
+                # Engine A: Bull Market Trend Continuation (Pullback to VAL in strong uptrend)
+                if (e20 > e50) and (0 <= dist_val <= val_threshold_pct) and (vol_val >= vol_avg * 0.8):
                     strategy_name = "Bull breakout pullback"
                     sl = val - (atr_multiplier * atr_val)
                     target = vah
 
-            # --- ENGINE B: BEAR MARKET (Flexible short/distribution setup) ---
-            elif market_regime == "Bear" and (e20 < e50 or close_price < e200):
-                if 0 <= dist_vah <= (val_threshold_pct * 1.5):
-                    strategy_name = "Bear breakdown pullback"
+            elif market_regime == "Bear":
+                # Engine B: Bear Market Short / Distribution (Rally to VAH in downtrend)
+                if (e20 < e50 or close_price < e200) and (0 <= dist_vah <= val_threshold_pct * 1.5):
+                    strategy_name = "Bear breakdown pullback (Short)"
                     sl = vah + (atr_multiplier * atr_val)
                     target = val
 
-            # --- ENGINE C: SIDEWAYS MARKET ---
-            elif market_regime == "Sideways" or adx_val <= 25:
+            elif market_regime == "Sideways":
+                # Engine C: Sideways Range Scalper (VAL bounce or VAH rejection)
                 if 0 <= dist_val <= val_threshold_pct:
                     strategy_name = "VAL reversal bounce"
                     sl = val - (atr_multiplier * atr_val)
@@ -371,7 +371,6 @@ def run_v3_backtest(ticker, regime_mode="Bull", years=3, val_threshold_pct=1.5, 
     df["EMA_200"] = df["Close"].ewm(span=200, adjust=False).mean()
     df["ATR"] = calculate_atr(df, window=14)
     df["Vol_SMA"] = df["Volume"].rolling(20).mean()
-    df["ADX"] = calculate_adx(df)
 
     trades = []
     current_capital = initial_capital
@@ -389,9 +388,6 @@ def run_v3_backtest(ticker, regime_mode="Bull", years=3, val_threshold_pct=1.5, 
             e50 = float(curr_row["EMA_50"])
             e200 = float(curr_row["EMA_200"])
             atr_p = float(curr_row["ATR"])
-            vol_p = float(curr_row["Volume"])
-            vol_avg = float(curr_row["Vol_SMA"])
-            adx_val = float(curr_row["ADX"]) if not np.isnan(curr_row["ADX"]) else 15.0
 
             dist_val = ((close_p - val) / val) * 100
             dist_vah = ((vah - close_p) / vah) * 100
