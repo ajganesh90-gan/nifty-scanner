@@ -103,10 +103,10 @@ NIFTY_500_EXT = [
 NIFTY_500_TICKERS = list(set(NIFTY_250_TICKERS + NIFTY_500_EXT))
 
 UNIVERSE_MAP = {
-    "Nifty 50": NIFTY_50_TICKERS,
-    "Nifty 100": NIFTY_100_TICKERS,
-    "Nifty 250": NIFTY_250_TICKERS,
-    "Nifty 500": NIFTY_500_TICKERS
+    "Nifty 50": tuple(NIFTY_50_TICKERS),
+    "Nifty 100": tuple(NIFTY_100_TICKERS),
+    "Nifty 250": tuple(NIFTY_250_TICKERS),
+    "Nifty 500": tuple(NIFTY_500_TICKERS)
 }
 
 # ==========================================
@@ -169,7 +169,6 @@ def calculate_volume_profile(df, lookback=20):
 # ==========================================
 @st.cache_data(ttl=3600)
 def detect_market_regime():
-    """Independent regime detector evaluating Nifty 50 macro benchmark indicators."""
     try:
         df = yf.download("^NSEI", period="1y", interval="1d", progress=False)
         if isinstance(df.columns, pd.MultiIndex):
@@ -187,10 +186,8 @@ def detect_market_regime():
         e50 = float(df["EMA_50"].iloc[-1])
         e200 = float(df["EMA_200"].iloc[-1])
         adx_val = float(df["ADX"].iloc[-1]) if not np.isnan(df["ADX"].iloc[-1]) else 18.0
-        
         e50_slope = float(df["EMA_50"].iloc[-1] - df["EMA_50"].iloc[-5])
 
-        # Regime Score Logic
         bull_score = (1 if c > e20 > e50 > e200 else 0) + (1 if e50_slope > 0 else 0) + (1 if adx_val > 22 else 0)
         bear_score = (1 if c < e20 < e50 < e200 else 0) + (1 if e50_slope < 0 else 0) + (1 if adx_val > 22 else 0)
         
@@ -208,7 +205,6 @@ def detect_market_regime():
 # HISTORICAL ANALOGUE SURVIVAL ESTIMATOR
 # ==========================================
 def calculate_historical_analogue_estimates(df, entry_price, target_price, stop_price, regime):
-    """Calculates analogue historical completion probability and median holding days."""
     try:
         if len(df) < 50:
             return "Insufficient historical evidence", "N/A", "N/A"
@@ -218,7 +214,6 @@ def calculate_historical_analogue_estimates(df, entry_price, target_price, stop_
         if similar_mask.sum() < 10:
             return "Insufficient historical evidence", "N/A", "N/A"
             
-        # Simulate forward outcomes for matching analogues
         successes = 0
         durations = []
         subset_indices = np.where(similar_mask)[0]
@@ -256,11 +251,12 @@ def calculate_historical_analogue_estimates(df, entry_price, target_price, stop_
 # V3.0 THREE INDEPENDENT TRADING ENGINES
 # ==========================================
 @st.cache_data(ttl=1800)
-def run_v3_scanner(ticker_list, forced_regime="AUTO", val_threshold_pct=1.5, atr_multiplier=1.2, min_rr=1.5):
+def run_v3_scanner(ticker_tuple, forced_regime="AUTO", val_threshold_pct=1.5, atr_multiplier=1.2, min_rr=1.5):
     signals = []
     scan_date = datetime.now().strftime("%Y-%m-%d")
     market_regime = forced_regime if forced_regime != "AUTO" else detect_market_regime()
     
+    ticker_list = list(ticker_tuple)
     data = yf.download(ticker_list, period="1y", interval="1d", group_by="ticker", progress=False)
 
     for ticker in ticker_list:
@@ -300,21 +296,21 @@ def run_v3_scanner(ticker_list, forced_regime="AUTO", val_threshold_pct=1.5, atr
             target = 0.0
 
             # --- ENGINE A: BULL MARKET ---
-            if market_regime == "Bull" and (e20 > e50 > e200) and (adx_val > 20):
+            if market_regime == "Bull" and (e20 > e50 > e200):
                 if 0 <= dist_val <= val_threshold_pct and vol_val >= (vol_avg * 0.8):
                     strategy_name = "Bull breakout pullback"
                     sl = val - (atr_multiplier * atr_val)
                     target = vah
 
-            # --- ENGINE B: BEAR MARKET ---
-            elif market_regime == "Bear" and (e20 < e50 < e200) and (adx_val > 20):
-                if 0 <= dist_vah <= val_threshold_pct and close_price < open_price:
+            # --- ENGINE B: BEAR MARKET (Flexible short/distribution setup) ---
+            elif market_regime == "Bear" and (e20 < e50 or close_price < e200):
+                if 0 <= dist_vah <= (val_threshold_pct * 1.5):
                     strategy_name = "Bear breakdown pullback"
                     sl = vah + (atr_multiplier * atr_val)
                     target = val
 
-            # --- ENGINE C: SIDEWAYS MARKET (VAL Bounce / VAH Rejection / Squeeze) ---
-            elif market_regime == "Sideways" or adx_val <= 22:
+            # --- ENGINE C: SIDEWAYS MARKET ---
+            elif market_regime == "Sideways" or adx_val <= 25:
                 if 0 <= dist_val <= val_threshold_pct:
                     strategy_name = "VAL reversal bounce"
                     sl = val - (atr_multiplier * atr_val)
@@ -324,11 +320,7 @@ def run_v3_scanner(ticker_list, forced_regime="AUTO", val_threshold_pct=1.5, atr
                     sl = vah + (atr_multiplier * atr_val)
                     target = poc
 
-            if not strategy_name:
-                continue
-
-            # Risk Reward & Adaptive No-Trade Filters
-            if sl == 0 or target == 0:
+            if not strategy_name or sl == 0 or target == 0:
                 continue
                 
             risk = abs(entry - sl)
@@ -336,7 +328,7 @@ def run_v3_scanner(ticker_list, forced_regime="AUTO", val_threshold_pct=1.5, atr
             rr_ratio = reward / risk if risk > 0 else 0
 
             if rr_ratio < min_rr:
-                continue # Adaptive filter: Reject inadequate R:R
+                continue
 
             median_est, p75_est, prob_est = calculate_historical_analogue_estimates(df, entry, target, sl, market_regime)
             raw_symbol = ticker.replace(".NS", "")
@@ -409,15 +401,15 @@ def run_v3_backtest(ticker, regime_mode="Bull", years=3, val_threshold_pct=1.5, 
             sl = 0.0
             target = 0.0
 
-            if regime_mode == "Bull" and (e20 > e50 > e200) and (0 <= dist_val <= val_threshold_pct):
+            if regime_mode == "Bull" and (e20 > e50) and (0 <= dist_val <= val_threshold_pct):
                 triggered = True
                 sl = val - (atr_multiplier * atr_p)
                 target = vah
-            elif regime_mode == "Bear" and (e20 < e50 < e200) and (0 <= dist_vah <= val_threshold_pct):
+            elif regime_mode == "Bear" and (e20 < e50 or close_p < e200) and (0 <= dist_vah <= val_threshold_pct * 1.5):
                 triggered = True
                 sl = vah + (atr_multiplier * atr_p)
                 target = val
-            elif regime_mode == "Sideways" and adx_val <= 25 and (0 <= dist_val <= val_threshold_pct):
+            elif regime_mode == "Sideways" and (0 <= dist_val <= val_threshold_pct):
                 triggered = True
                 sl = val - (atr_multiplier * atr_p)
                 target = poc
@@ -435,7 +427,6 @@ def run_v3_backtest(ticker, regime_mode="Bull", years=3, val_threshold_pct=1.5, 
                         high_p = float(exit_row["High"])
                         low_p = float(exit_row["Low"])
 
-                        # Gap-aware realistic stop-first execution
                         hit_sl = low_p <= sl if regime_mode != "Bear" else high_p >= sl
                         hit_target = high_p >= target if regime_mode != "Bear" else low_p <= target
 
